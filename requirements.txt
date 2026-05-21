@@ -1,0 +1,10 @@
+streamlit>=1.32
+pandas>=2.0
+plotly>=5.18
+requests>=2.31
+gspread>=6.0
+google-auth>=2.27
+google-auth-oauthlib>=1.2
+openpyxl>=3.1
+reportlab>=4.0
+notion-client>=2.2
