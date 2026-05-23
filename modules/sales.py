@@ -56,7 +56,7 @@ def render():
         fig.add_trace(go.Bar(x=m["ym"], y=m["sales"], name="매출", marker_color=["#C9A961" if v>=0 else "#D32F2F" for v in m["sales"]]), secondary_y=False)
         fig.add_trace(go.Scatter(x=m["ym"], y=m["paid_count"], name="결제건수", mode="lines+markers", line=dict(color="#0A0A0A", width=2)), secondary_y=True)
         fig.update_layout(height=340, margin=dict(t=20,b=20,l=20,r=20), hovermode="x unified", plot_bgcolor="#fff", paper_bgcolor="#fff", legend=dict(orientation="h", y=1.1))
-        fig.update_yaxes(title_text="매출(")", secondary_y=False, gridcolor="#E8E8E8")
+        fig.update_yaxes(title_text="매출(₩)", secondary_y=False, gridcolor="#E8E8E8")
         fig.update_yaxes(title_text="건수", secondary_y=True, gridcolor="#E8E8E8")
         st.plotly_chart(fig, use_container_width=True)
     with col_r:
@@ -71,8 +71,8 @@ def render():
         st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown(section_header("LTV Top 10 고객", "누적 매출 기준"), unsafe_allow_html=True)
-    ltv = paid.groupby("customer").agg(누적매출=("amount","sum"), 건어건=("amount","count"), 최근거래=("date","max")).reset_index().sort_values("누적매출", ascending=False).head(10)
+    ltv = paid.groupby("customer").agg(누적매출=("amount","sum"), 거래건=("amount","count"), 최근거래=("date","max")).reset_index().sort_values("누적매출", ascending=False).head(10)
     for i, row in enumerate(ltv.itertuples(), 1):
-        st.markdown(leaderboard_row(rank=i, name=row.customer[:25] or "-", sub=f"{row.거래건}건 · 최근 {row.최근거래.strftime('%m/%d')}", value=f"₩{int(row.누적매출):,}", value_label="LIFETIME", color="#C9A961"), unsafe_allow_html=True)
+        st.markdown(leaderboard_row(rank=i, name=(row.customer[:25] or "-"), sub=f"{row.거래건}건 · 최근 {row.최근거래.strftime('%m/%d')}", value=f"₩{int(row.누적매출):,}", value_label="LIFETIME", color="#C9A961"), unsafe_allow_html=True)
 
     render_task_widget("매출")
