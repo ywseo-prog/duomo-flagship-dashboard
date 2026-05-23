@@ -1,15 +1,36 @@
 """
-Duomo&Co 플래그십 업무일지 파서 v0.2
-- NEW(2025.10~) / OLD(2025.05) 양식 통합
-- 매출/담당자/브랜드 집계
-- Streamlit 캐시 호환
+Duomo&Co 플래그십 업무일지 파서 v0.9
+- 5-RowType 분기 (DATE_HEADER / CATEGORY_META / RECORD / PROGRESS / ISSUE)
+- parse_worklog_v2(): dict 구조 반환 (스펙 v0.9)
+- parse_worklog(): 기존 DataFrame 호환 (v2 위임)
+- NEW(2025.10~) / OLD(2025.05) 양식 자동 감지
 """
 import re
 import pandas as pd
 import requests
 from io import StringIO
+from datetime import datetime
+from enum import Enum
 import os
 import streamlit as st
+
+
+class RowType(Enum):
+    DATE_HEADER   = "date_header"     # ① B="날짜" + C에 날짜 패턴
+    CATEGORY_META = "category_meta"   # ② A="카테고리" (J에 일자 총매출)
+    RECORD        = "record"          # ③ status/customer 있는 상담 행
+    PROGRESS      = "progress"        # ④ 진행사항
+    ISSUE         = "issue"           # ⑤ 이슈사항
+
+
+# 컬럼 매핑 (28컬럼 기준, J까지)
+COL = {
+    "channel": 0, "category": 1, "status": 2, "customer": 3,
+    "phone": 4, "content": 5,
+    "team_count_label": 5,     # F (날짜 행에서 "내방객(팀)" 라벨)
+    "person": 8, "team_count": 8,    # I (날짜 행에서 팀 수)
+    "amount": 9, "date_total_sales": 9,  # J (카테고리 행에서 일자 총매출)
+}
 
 SHEET_ID = "1enUaMwY092nn27BDTxvHCz9hmrZRVIxXTSU3JKjmw64"
 WORKLOG_TAB = "플래그십 업무일지"
@@ -64,37 +85,192 @@ def fetch_sheet_csv(sheet_name, sheet_id=SHEET_ID):
     r.raise_for_status()
     return r.text
 
-def parse_worklog(csv_text):
+def detect_row_type(row: list) -> RowType | None:
+    """5-RowType 분기 — 우선순위 순서 그대로 검사."""
+    r = list(row) + [""] * 30
+    # ① DATE_HEADER: B="날짜" + C에 날짜 패턴
+    if str(r[1]).strip() == "날짜" and DATE_RE.match(str(r[2]).strip()):
+        return RowType.DATE_HEADER
+    # 호환: 일부 OLD 양식은 A=날짜
+    if str(r[0]).strip() == "날짜" and DATE_RE.match(str(r[2]).strip()):
+        return RowType.DATE_HEADER
+    # ② CATEGORY_META: A="카테고리"
+    if str(r[0]).strip() == "카테고리":
+        return RowType.CATEGORY_META
+    # ④ PROGRESS
+    if str(r[1]).strip() == "진행사항" or str(r[0]).strip() == "진행사항":
+        return RowType.PROGRESS
+    # ⑤ ISSUE
+    if str(r[1]).strip() == "이슈사항" or str(r[0]).strip() == "이슈사항":
+        return RowType.ISSUE
+    # ③ RECORD: status(C) 또는 customer(D)에 값 있음
+    if str(r[2]).strip() or str(r[3]).strip():
+        return RowType.RECORD
+    return None
+
+
+def parse_worklog_v2(csv_text: str) -> dict:
+    """5-RowType 분기 + dict 구조 반환 (스펙 v0.9)
+
+    Returns:
+        {
+            "header": {"month": 5, "month_target": 99770000,
+                       "current_total": 79854000, "achievement": 0.8004},
+            "dates": [
+                {
+                    "date": "2026-05-23",
+                    "_sheet_row": <int>,
+                    "fmt": "NEW",
+                    "meta": {"weekday": "토", "persons": [...],
+                             "visitor_teams": 9, "total_sales": 2335000},
+                    "records": [{...}],   # RowType.RECORD
+                    "progress": [str],    # RowType.PROGRESS (content 텍스트 리스트)
+                    "issues": [str],      # RowType.ISSUE
+                }, ...
+            ]
+        }
+    """
     df_raw = pd.read_csv(StringIO(csv_text), header=None, dtype=str, keep_default_na=False)
     rows = df_raw.values.tolist()
-    records = []
-    cur_date, cur_fmt = None, None
-    for row_idx, r in enumerate(rows, start=1):  # 1-indexed (gspread 호환)
-        r = list(r) + [""]*30
-        if r[1] == "날짜" or r[0] == "날짜":
-            m = DATE_RE.match(r[2].strip())
+
+    # === 헤더 (행 1-2) ===
+    header = {}
+    if len(rows) >= 2:
+        h_row = list(rows[0]) + [""] * 10
+        v_row = list(rows[1]) + [""] * 10
+        for i, h in enumerate(h_row):
+            h_s = str(h).strip()
+            v_s = str(v_row[i] if i < len(v_row) else "").strip()
+            if not h_s:
+                continue
+            m = re.search(r"(\d+)\s*월\s*목표\s*매출", h_s)
             if m:
-                cur_date = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-                cur_fmt = "NEW" if r[1] == "날짜" else "OLD"
+                num = re.sub(r"[^\d]", "", v_s)
+                if num:
+                    header["month"] = int(m.group(1))
+                    header["month_target"] = int(num)
+                continue
+            if "매출" in h_s and any(k in h_s for k in ["총 합", "총합", "당일", "금일", "오늘", "누적"]):
+                num = re.sub(r"[^\d]", "", v_s)
+                if num:
+                    header["current_total"] = int(num)
+                continue
+            if "달성률" in h_s or "달성율" in h_s:
+                m = re.search(r"([\d.]+)", v_s)
+                if m:
+                    val = float(m.group(1))
+                    header["achievement"] = val / 100.0 if val > 1 else val
+
+    # === 날짜 블록 누적 ===
+    dates = []
+    cur_block = None
+    cur_fmt = None
+
+    for row_idx, raw in enumerate(rows, start=1):
+        r = list(raw) + [""] * 30
+        rt = detect_row_type(r)
+        if rt is None:
             continue
-        if r[0] == "카테고리" or r[1] == "카테고리": continue
-        if r[1] in ("진행사항","이슈사항") or r[0] in ("진행사항","이슈사항"): continue
-        if cur_date and (r[2].strip() or r[3].strip()):
+
+        if rt == RowType.DATE_HEADER:
+            m = DATE_RE.match(str(r[2]).strip())
+            if not m:
+                continue
+            d_str = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+            try:
+                d_obj = datetime.strptime(d_str, "%Y-%m-%d").date()
+                weekday = ["월","화","수","목","금","토","일"][d_obj.weekday()]
+            except ValueError:
+                weekday = ""
+            cur_fmt = "NEW" if str(r[1]).strip() == "날짜" else "OLD"
+            # I열 — 내방객 팀 수
+            try:
+                visitor_teams = int(re.sub(r"[^\d]", "", str(r[8]).strip()) or 0)
+            except (ValueError, TypeError):
+                visitor_teams = 0
+            cur_block = {
+                "date": d_str, "_sheet_row": row_idx, "fmt": cur_fmt,
+                "meta": {
+                    "weekday": weekday, "persons": [],
+                    "visitor_teams": visitor_teams, "total_sales": 0,
+                },
+                "records": [], "progress": [], "issues": [],
+            }
+            dates.append(cur_block)
+
+        elif rt == RowType.CATEGORY_META and cur_block:
+            # J열 — 일자 총매출
+            num = re.sub(r"[^\d]", "", str(r[9]).strip())
+            if num:
+                try:
+                    cur_block["meta"]["total_sales"] = int(num)
+                except ValueError:
+                    pass
+
+        elif rt == RowType.PROGRESS and cur_block:
+            content = str(r[5]).strip()
+            if not content:
+                content = " ".join(str(r[i]).strip() for i in range(2, 9) if str(r[i]).strip()).strip()
+            if content and content != "진행사항":
+                cur_block["progress"].append(content)
+
+        elif rt == RowType.ISSUE and cur_block:
+            content = str(r[5]).strip()
+            if not content:
+                content = " ".join(str(r[i]).strip() for i in range(2, 9) if str(r[i]).strip()).strip()
+            if content and content != "이슈사항":
+                cur_block["issues"].append(content)
+
+        elif rt == RowType.RECORD and cur_block:
             amt = parse_amount(r[9])
-            records.append({
-                "_sheet_row": row_idx,  # 시트의 실제 행 번호 (gspread cell update용)
-                "date": cur_date, "fmt": cur_fmt,
+            persons = normalize_person(r[8])
+            # block meta.persons에 누적 (담당자 자동 추출)
+            for p in persons:
+                if p not in cur_block["meta"]["persons"]:
+                    cur_block["meta"]["persons"].append(p)
+            cur_block["records"].append({
+                "_sheet_row": row_idx,
                 "channel": r[0], "category": r[1], "status": r[2],
-                "customer": str(r[3]).replace("\n"," / "),
+                "customer": str(r[3]).replace("\n", " / "),
                 "phone": r[4], "content": r[5],
-                "person_raw": r[8], "persons": normalize_person(r[8]),
+                "person_raw": r[8], "persons": persons,
                 "amount": amt, "brands": detect_brands(r[5]),
+            })
+
+    return {"header": header, "dates": dates}
+
+
+def parse_worklog(csv_text: str) -> pd.DataFrame:
+    """기존 호환 — DataFrame 반환. 내부적으로 parse_worklog_v2 위임."""
+    v2 = parse_worklog_v2(csv_text)
+    records = []
+    for d in v2["dates"]:
+        for r in d["records"]:
+            records.append({
+                **r, "date": d["date"], "fmt": d.get("fmt"),
             })
     df = pd.DataFrame(records)
     if len(df):
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
         df["ym"] = df["date"].dt.strftime("%Y-%m")
     return df
+
+@st.cache_data(ttl=300)
+def load_worklog_v2(source: str = "auto") -> dict:
+    """parse_worklog_v2의 캐시드 entry — 5-RowType dict 구조 반환."""
+    sample_path = os.path.join(os.path.dirname(__file__), "..", "data", "worklog_sample.csv")
+    if source in ("auto", "live"):
+        try:
+            csv = fetch_sheet_csv(WORKLOG_TAB)
+            return parse_worklog_v2(csv)
+        except Exception:
+            if source == "live":
+                raise
+    if os.path.exists(sample_path):
+        with open(sample_path, encoding="utf-8") as f:
+            return parse_worklog_v2(f.read())
+    return {"header": {}, "dates": []}
+
 
 @st.cache_data(ttl=300)
 def load_worklog_df(source="auto"):
