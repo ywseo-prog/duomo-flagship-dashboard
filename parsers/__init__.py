@@ -9,6 +9,7 @@ from .worklog_parser import (
     daily_report_data, format_katalk_report,
 )
 from .worklog_writer import (
-    append_worklog_row, format_row_tsv, format_date_header_tsv,
+    append_worklog_row, append_worklog_block,
+    format_row_tsv, format_date_header_tsv,
     CHANNEL_OPTIONS, CATEGORY_OPTIONS, STATUS_OPTIONS,
 )

@@ -14,7 +14,8 @@ from parsers import (
     load_worklog_df, load_monthly_target, SHEET_ID, WORKLOG_TAB,
     aggregate_by_brand, aggregate_by_customer,
     daily_report_data, format_katalk_report,
-    append_worklog_row, format_row_tsv, format_date_header_tsv,
+    append_worklog_row, append_worklog_block,
+    format_row_tsv, format_date_header_tsv,
     CHANNEL_OPTIONS, CATEGORY_OPTIONS, STATUS_OPTIONS,
 )
 from utils.styles import (
@@ -296,99 +297,158 @@ def _render_day_card(d_obj: date, day_df: pd.DataFrame):
 # Tab 0. ✍ 영업 기록 작성 (본사 시트 Write)
 # ====================================================================
 def _render_write_tab():
+    """본사 시트의 일자 블록 형식 — date 헤더 + 표 편집 + 진행/이슈 메모 + 일괄 저장"""
     st.markdown(section_header(
-        "본사 시트와 동일한 형식으로 작성 → 즉시 기록",
-        "Service account 등록 시 자동 write / 미등록 시 TSV 복사로 수동 붙여넣기"
+        "본사 업무일지 작성 (대시보드 내장)",
+        "본사 시트의 일자 블록과 동일한 형식 — 표를 직접 편집하고 일괄 저장"
     ), unsafe_allow_html=True)
 
-    # Service account 상태 표시
     from parsers.worklog_writer import _has_service_account
     if _has_service_account():
         st.markdown(alert_banner(
-            "✓ Google Service Account 활성",
-            "폼 제출 시 본사 시트의 해당 날짜 블록에 자동 append됩니다. (gspread)",
+            "✓ Service Account 활성 — 저장 시 본사 시트에 자동 기록",
+            "동일 날짜 블록이 있으면 거기에 행 추가, 없으면 새 블록 생성 (날짜 헤더 + 카테고리 + 데이터 + 진행/이슈).",
             level="green", icon="✓"
         ), unsafe_allow_html=True)
     else:
         st.markdown(alert_banner(
-            "ⓘ Service Account 미설정 — 수동 모드",
-            "폼 제출 시 TSV 텍스트가 생성됩니다. 복사 → 본사 시트에 붙여넣기. "
-            "자동 write 활성화: secrets.toml.example의 [gcp_service_account] 블록 참조.",
+            "ⓘ Service Account 미설정 — 저장 시 TSV 텍스트 출력",
+            "복사해서 본사 시트 빈 행에 붙여넣으면 자동 분리됩니다. 자동 모드 활성화는 하단 expander 참조.",
             level="blue", icon="ⓘ"
         ), unsafe_allow_html=True)
 
-    with st.form("worklog_form", clear_on_submit=False):
-        st.markdown("##### 📅 날짜 & 분류")
-        c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
-        rec_date = c1.date_input("날짜", value=date.today())
-        channel = c2.selectbox("채널", CHANNEL_OPTIONS, index=0)
-        category = c3.selectbox("카테고리", CATEGORY_OPTIONS, index=0)
-        status_v = c4.selectbox("상태", STATUS_OPTIONS, index=1)
+    # === 일자 헤더 ===
+    hc1, hc2, hc3 = st.columns([1.5, 2, 2])
+    rec_date = hc1.date_input("📅 작성 날짜", value=date.today(), key="block_date")
+    weekday = ["월","화","수","목","금","토","일"][rec_date.weekday()]
+    hc2.metric("일자", f"{rec_date.strftime('%Y.%m.%d')} ({weekday})")
 
-        st.markdown("##### 👤 고객 정보")
-        c5, c6 = st.columns([2, 2])
-        customer = c5.text_input("고객명", placeholder="예) 김아름 사원 손님 / 단체 가족 / 30대 부부")
-        phone = c6.text_input("전화 (선택)", placeholder="010-XXXX-XXXX")
+    # === session_state로 표 데이터 유지 ===
+    state_key = f"worklog_rows_{rec_date.isoformat()}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = pd.DataFrame([
+            {"채널":"내방", "카테고리":"소비자", "상태":"ing", "고객명":"", "전화":"",
+             "내용":"", "담당자":"", "금액":0}
+            for _ in range(3)  # 빈 행 3개로 시작
+        ])
 
-        st.markdown("##### 📋 상담 내용")
-        content = st.text_area(
-            "내용",
-            placeholder="예) Luce / Grammoluce / Ginger / Tekio 제품 견적 안내 > 다음주 재방문 예정",
-            height=100,
-        )
+    # === 표 편집기 (data_editor) ===
+    st.markdown("##### 📋 거래 행 (자유롭게 추가/수정/삭제)")
+    edited = st.data_editor(
+        st.session_state[state_key],
+        key=f"editor_{rec_date.isoformat()}",
+        num_rows="dynamic",  # 행 추가/삭제 자유
+        use_container_width=True,
+        column_config={
+            "채널": st.column_config.SelectboxColumn(
+                "📍 채널", options=CHANNEL_OPTIONS, required=False, width="small",
+            ),
+            "카테고리": st.column_config.SelectboxColumn(
+                "🏷 카테고리", options=CATEGORY_OPTIONS, required=False, width="small",
+            ),
+            "상태": st.column_config.SelectboxColumn(
+                "🚦 상태", options=STATUS_OPTIONS, required=False, width="small",
+            ),
+            "고객명": st.column_config.TextColumn(
+                "👤 고객명", width="medium",
+                help="예) 김아름 사원 손님 / 단체 가족 / 30대 부부",
+            ),
+            "전화": st.column_config.TextColumn(
+                "☎ 전화", width="small",
+            ),
+            "내용": st.column_config.TextColumn(
+                "📝 내용", width="large",
+                help="상담 내용 (제품·금액·다음 액션 등)",
+            ),
+            "담당자": st.column_config.TextColumn(
+                "🧑 담당자", width="small",
+                help="예) 서영완 선임 / 추승민 사원",
+            ),
+            "금액": st.column_config.NumberColumn(
+                "💰 금액(원)", min_value=0, step=10_000, format="₩%d", width="small",
+            ),
+        },
+        hide_index=True,
+    )
+    st.session_state[state_key] = edited
 
-        st.markdown("##### 💰 담당자 & 금액")
-        c7, c8 = st.columns([1.5, 1])
-        person = c7.text_input("담당자", placeholder="예) 서영완 선임 / 추승민 사원")
-        amount = c8.number_input("금액 (원, 결제 시만)", min_value=0, step=10_000, value=0)
+    # === 미리보기 통계 ===
+    valid_rows = edited[edited["고객명"].astype(str).str.strip() != ""]
+    paid_rows = valid_rows[valid_rows["금액"] > 0]
+    mc1, mc2, mc3 = st.columns(3)
+    mc1.metric("유효 행", f"{len(valid_rows)}")
+    mc2.metric("결제 건", f"{len(paid_rows)}")
+    mc3.metric("결제 합계", f"₩{int(paid_rows['금액'].sum()):,}")
 
-        submitted = st.form_submit_button("📤 본사 시트에 기록", type="primary", use_container_width=True)
+    # === 진행사항 / 이슈사항 메모 ===
+    st.markdown("##### 📝 블록 메모")
+    nc1, nc2 = st.columns(2)
+    progress_note = nc1.text_area(
+        "진행사항 (선택)", height=100, key=f"prog_{rec_date.isoformat()}",
+        placeholder="오늘의 핵심 진행건 메모 — 예) 카민디자인 견적 회신 / VIP A 컨설팅 일정 조율"
+    )
+    issue_note = nc2.text_area(
+        "이슈사항 (선택)", height=100, key=f"issue_{rec_date.isoformat()}",
+        placeholder="이슈/리스크 메모 — 예) FLOS 5월 입고 지연 / LASVIT 클레임 대응 중"
+    )
 
-    if submitted:
-        if not customer.strip():
-            st.error("고객명은 필수입니다.")
+    # === 저장 버튼 ===
+    sc1, sc2 = st.columns([3, 1])
+    save_clicked = sc2.button("💾 본사 시트에 저장", type="primary", use_container_width=True)
+    sc1.caption(f"💡 {len(valid_rows)}건의 거래 + 진행/이슈 메모를 {rec_date.strftime('%Y.%m.%d')} 블록에 일괄 기록")
+
+    if save_clicked:
+        if not len(valid_rows):
+            st.error("유효한 행이 없습니다. 고객명을 한 줄 이상 입력하세요.")
             return
-        record = {
-            "channel": channel,
-            "category": category,
-            "status": status_v,
-            "customer": customer.strip(),
-            "phone": phone.strip(),
-            "content": content.strip(),
-            "person": person.strip(),
-            "amount": amount if amount > 0 else "",
-        }
-        with st.spinner("본사 시트에 기록 중..."):
-            result = append_worklog_row(record, rec_date, SHEET_ID, WORKLOG_TAB)
+
+        # df → records
+        records = []
+        for _, r in valid_rows.iterrows():
+            records.append({
+                "channel": str(r["채널"]).strip(),
+                "category": str(r["카테고리"]).strip(),
+                "status": str(r["상태"]).strip(),
+                "customer": str(r["고객명"]).strip(),
+                "phone": str(r["전화"]).strip(),
+                "content": str(r["내용"]).strip(),
+                "person": str(r["담당자"]).strip(),
+                "amount": int(r["금액"]) if r["금액"] else "",
+            })
+
+        with st.spinner(f"본사 시트에 {len(records)}건 일괄 기록 중..."):
+            result = append_worklog_block(
+                records=records, target_date=rec_date,
+                progress_note=progress_note.strip(),
+                issue_note=issue_note.strip(),
+                sheet_id=SHEET_ID, sheet_name=WORKLOG_TAB,
+            )
 
         if result["ok"]:
-            st.success(f"✓ 본사 시트에 기록 완료 (행 {result['row']}, {rec_date.isoformat()})")
-            if result.get("header_tsv"):
-                st.caption(f"※ 새 날짜 블록이 시트 맨 아래에 추가됨 — 시트에서 적절한 위치로 이동 권장")
-            # 5분 캐시 clear → 즉시 분석 갱신
-            st.cache_data.clear()
+            st.success(f"✓ 본사 시트에 {result['rows_added']}건 저장 완료 ({rec_date.isoformat()})")
             st.balloons()
+            # 표 초기화 옵션
+            if st.button("✨ 표 비우고 새 블록 작성", key="reset_after_save"):
+                del st.session_state[state_key]
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.cache_data.clear()
         else:
             st.warning(f"⚠ 자동 write 미실행: {result.get('error', '')}")
-            st.markdown(section_header("TSV 복사 — 본사 시트에 붙여넣기"), unsafe_allow_html=True)
-            if result.get("header_tsv"):
-                st.caption("📌 같은 날짜 블록이 시트에 없습니다 — 아래 헤더부터 붙여넣기:")
-                st.code(result["header_tsv"], language="text")
-                st.caption("그 다음 카테고리 행:")
-                st.code("\t".join(["카테고리"] + [""]*9), language="text")
-            st.caption("📌 데이터 행:")
-            st.code(result["tsv"], language="text")
-            st.caption("💡 시트에 빈 행 우클릭 → 셀에 붙여넣기 (탭으로 자동 분리)")
+            st.markdown(section_header("📋 TSV 일괄 출력 — 본사 시트에 붙여넣기"), unsafe_allow_html=True)
+            st.caption("아래 전체를 복사해서 본사 시트의 빈 영역에 붙여넣으면 한 번에 행 전체가 채워집니다.")
+            st.code(result["tsv_bulk"], language="text")
 
-    # 빠른 도움말
-    with st.expander("ⓘ Service Account 자동 write 활성화 방법"):
+    # === 도움말 ===
+    with st.expander("ⓘ Service Account 자동 write 활성화 (저장 시 즉시 본사 시트 반영)"):
         st.markdown("""
-1. Google Cloud Console → 새 프로젝트 또는 기존 프로젝트
+1. Google Cloud Console → 프로젝트 생성/선택
 2. **APIs & Services → Library** → "Google Sheets API" 활성화
-3. **APIs & Services → Credentials → Create Credentials → Service Account**
-4. JSON 키 다운로드
-5. **본사 시트** 우상단 공유 → service account 이메일에 **편집자 권한** 부여
-6. Streamlit Cloud → **Settings → Secrets** 에 아래 블록 추가:
+3. **APIs & Services → Credentials → Create Credentials → Service Account** 만들기
+4. 생성된 service account에서 **Keys → Add Key → Create new key (JSON)** → 다운로드
+5. **본사 시트** 우상단 공유 → JSON 안의 `client_email` 값에 **편집자 권한** 부여
+6. Streamlit Cloud → **Manage app → Settings → Secrets** 에 아래 추가:
 
 ```toml
 [gcp_service_account]
@@ -397,10 +457,14 @@ project_id = "your-project"
 private_key_id = "..."
 private_key = "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
 client_email = "duomo-flagship-sa@your-project.iam.gserviceaccount.com"
-...
+client_id = "..."
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "https://..."
 ```
 
-저장 후 앱 자동 재시작 → 본 탭에 ✓ Active 표시됨.
+저장 후 앱 자동 재시작 → 본 탭 상단에 `✓ Active` 그린 배너 표시됨.
 """)
 
 

@@ -201,3 +201,106 @@ def append_worklog_row(record: dict, target_date: date,
         result["error"] = f"gspread write 실패: {e} — TSV fallback"
         result["header_tsv"] = format_date_header_tsv(target_date)
         return result
+
+
+def append_worklog_block(records: list[dict], target_date: date,
+                         progress_note: str = "", issue_note: str = "",
+                         sheet_id: str = "", sheet_name: str = "플래그십 업무일지") -> dict:
+    """
+    본사 시트에 일자 블록 전체 bulk write:
+    - 동일 날짜 블록 있으면 그 안에 모든 행 insert (메모는 별도)
+    - 없으면 시트 맨 아래에 새 블록 (날짜 헤더 + 카테고리 헤더 + 데이터 N행 + 진행/이슈)
+
+    records: [{channel, category, status, customer, phone, content, person, amount}, ...]
+    """
+    result = {"ok": False, "method": None, "rows_added": 0, "tsv_bulk": "", "error": None}
+
+    # TSV bulk 생성 (fallback용)
+    tsv_lines = []
+    weekday = ["월","화","수","목","금","토","일"][target_date.weekday()]
+    date_str = f"{target_date.year}.{target_date.month}.{target_date.day} ({weekday})"
+    tsv_lines.append(f"\t날짜\t{date_str}\t\t\t내방객(팀)\t{len(records)}\t\t\t결제 금액")
+    tsv_lines.append("\t카테고리\t\t\t\t\t\t\t\t")
+    for r in records:
+        tsv_lines.append(format_row_tsv(r))
+    if progress_note:
+        tsv_lines.append(f"\t진행사항\t\t\t\t{progress_note}\t\t\t\t")
+    if issue_note:
+        tsv_lines.append(f"\t이슈사항\t\t\t\t{issue_note}\t\t\t\t")
+    result["tsv_bulk"] = "\n".join(tsv_lines)
+
+    client = _get_gspread_client()
+    if not client:
+        result["method"] = "tsv"
+        result["error"] = "Service account 미설정 — TSV로 복사하여 시트에 붙여넣으세요."
+        return result
+
+    try:
+        sh = client.open_by_key(sheet_id)
+        ws = sh.worksheet(sheet_name)
+        header_row = find_date_block_row(ws, target_date)
+
+        rows_to_add = []
+        for r in records:
+            rows_to_add.append([
+                r.get("channel", ""),
+                r.get("category", ""),
+                r.get("status", ""),
+                r.get("customer", ""),
+                r.get("phone", ""),
+                r.get("content", ""),
+                "", "",
+                r.get("person", ""),
+                str(r.get("amount", "")) if r.get("amount") else "",
+            ])
+
+        if header_row:
+            # 기존 블록 — 카테고리 행 다음에 batch insert
+            all_rows = ws.get_all_values()
+            insert_after = header_row + 1  # 카테고리 헤더
+            for i in range(header_row + 2, min(len(all_rows) + 1, header_row + 60)):
+                row_vals = all_rows[i-1] if i-1 < len(all_rows) else []
+                if len(row_vals) > 1 and str(row_vals[1]).strip() in ("날짜", "진행사항", "이슈사항"):
+                    insert_after = i - 1
+                    break
+                if not any(str(v).strip() for v in row_vals[:6]):
+                    insert_after = i - 1
+                    break
+                insert_after = i
+            new_row_idx = insert_after + 1
+            if rows_to_add:
+                ws.insert_rows(rows_to_add, row=new_row_idx, value_input_option="USER_ENTERED")
+                result["rows_added"] = len(rows_to_add)
+            # 메모는 추가 처리 안 함 (기존 블록 메모 보존)
+        else:
+            # 새 블록 생성
+            ws.append_row(
+                ["", "날짜", date_str, "", "", "내방객(팀)", str(len(records)), "", "", "결제 금액"],
+                value_input_option="USER_ENTERED",
+            )
+            ws.append_row(
+                ["카테고리", "", "", "", "", "", "", "", "", ""],
+                value_input_option="USER_ENTERED",
+            )
+            for row_data in rows_to_add:
+                ws.append_row(row_data, value_input_option="USER_ENTERED")
+            if progress_note:
+                ws.append_row(
+                    ["", "진행사항", "", "", "", progress_note, "", "", "", ""],
+                    value_input_option="USER_ENTERED",
+                )
+            if issue_note:
+                ws.append_row(
+                    ["", "이슈사항", "", "", "", issue_note, "", "", "", ""],
+                    value_input_option="USER_ENTERED",
+                )
+            result["rows_added"] = len(rows_to_add)
+
+        result["ok"] = True
+        result["method"] = "gspread"
+        return result
+
+    except Exception as e:
+        result["method"] = "tsv"
+        result["error"] = f"gspread bulk write 실패: {e} — TSV fallback"
+        return result
