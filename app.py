@@ -52,16 +52,34 @@ with st.sidebar:
     st.markdown("---")
     st.caption("© Duomo&Co 2026")
 
-from modules import calendar as calendar_mod, worklog, sales, proposals, orders, rentals, as_service, inbound
+# Graceful per-module import — 한 모듈이 깨져도 나머지는 동작
+ROUTES = {}
+_failed = {}
 
-ROUTES = {
-    "🗓 팀 캘린더": calendar_mod.render,
-    "📊 업무일지": worklog.render,
-    "💰 매출": sales.render,
-    "📋 제안서 관리": proposals.render,
-    "📦 발주 상황": orders.render,
-    "🎬 대여": rentals.render,
-    "🔧 AS": as_service.render,
-    "🚢 입고 추적": inbound.render,
-}
-ROUTES[module]()
+def _safe_import(label, importer):
+    try:
+        ROUTES[label] = importer()
+    except Exception as e:
+        _failed[label] = f"{type(e).__name__}: {e}"
+
+_safe_import("🗓 팀 캘린더",   lambda: __import__("modules.calendar",   fromlist=["render"]).render)
+_safe_import("📊 업무일지",    lambda: __import__("modules.worklog",    fromlist=["render"]).render)
+_safe_import("💰 매출",        lambda: __import__("modules.sales",      fromlist=["render"]).render)
+_safe_import("📋 제안서 관리", lambda: __import__("modules.proposals",  fromlist=["render"]).render)
+_safe_import("📦 발주 상황",   lambda: __import__("modules.orders",     fromlist=["render"]).render)
+_safe_import("🎬 대여",        lambda: __import__("modules.rentals",    fromlist=["render"]).render)
+_safe_import("🔧 AS",          lambda: __import__("modules.as_service", fromlist=["render"]).render)
+_safe_import("🚢 입고 추적",   lambda: __import__("modules.inbound",    fromlist=["render"]).render)
+
+if module in ROUTES:
+    ROUTES[module]()
+elif module in _failed:
+    st.error(f"⚠ 본 모듈 로드 실패: {_failed[module]}")
+    st.caption("다른 모듈은 사이드바에서 선택 가능합니다. 본 모듈 복구 진행 중.")
+    with st.expander("기술 상세 (전체 모듈 import 상태)"):
+        for k in ["🗓 팀 캘린더","📊 업무일지","💰 매출","📋 제안서 관리","📦 발주 상황","🎬 대여","🔧 AS","🚢 입고 추적"]:
+            mark = "✅" if k in ROUTES else "❌"
+            err = f" — {_failed[k]}" if k in _failed else ""
+            st.caption(f"{mark} {k}{err}")
+else:
+    st.error("모듈을 찾을 수 없습니다.")
