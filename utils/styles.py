@@ -227,6 +227,46 @@ div[data-testid="stMetricLabel"] { font-size: 11px !important; letter-spacing: 0
 .kanban-card .kk-title { font-weight: 600; color: var(--text-primary); font-size: 13px; }
 .kanban-card .kk-meta { color: var(--text-muted); font-size: 10px; margin-top: 3px; }
 
+/* 영업 보드 — 날짜별 카드 */
+.sb-day {
+  background: #fff; border: 1px solid var(--border); border-radius: 12px;
+  margin-bottom: 14px; box-shadow: var(--shadow); overflow: hidden;
+}
+.sb-day-head {
+  background: linear-gradient(135deg, #0A0A0A 0%, #1A1A1A 100%);
+  color: #fff; padding: 12px 18px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sb-day-head .sd-date { font-family: 'Inter',sans-serif; font-size: 16px; font-weight: 800; letter-spacing: -0.3px; }
+.sb-day-head .sd-meta { font-size: 11px; color: #BBB; letter-spacing: 0.4px; }
+.sb-day-head .sd-kpi { display: flex; gap: 18px; font-size: 12px; }
+.sb-day-head .sd-kpi b { font-family: 'Inter',sans-serif; font-size: 15px; color: #C9A961; margin-left: 6px; }
+.sb-row {
+  display: grid; grid-template-columns: 80px 70px 1fr 130px 100px;
+  gap: 10px; padding: 10px 18px; align-items: flex-start;
+  border-top: 1px solid #F0F0F0; font-size: 13px;
+}
+.sb-row:hover { background: #FAFAFA; }
+.sb-row .sb-badges { display: flex; flex-direction: column; gap: 3px; }
+.sb-row .sb-status { font-family: 'Inter',sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; text-align: center; }
+.sb-row .sb-customer { font-weight: 600; color: #0A0A0A; font-size: 13px; }
+.sb-row .sb-content { color: #555; font-size: 12px; margin-top: 3px; line-height: 1.45; }
+.sb-row .sb-phone { font-family: 'Inter',sans-serif; font-size: 11px; color: #999; margin-top: 2px; }
+.sb-row .sb-person { font-size: 11px; color: #777; text-align: right; }
+.sb-row .sb-amount { font-family: 'Inter',sans-serif; font-size: 14px; font-weight: 700; text-align: right; color: #C9A961; }
+.sb-row .sb-amount.zero { color: #BBB; font-weight: 400; }
+.sb-foot {
+  background: #FAFAFA; padding: 8px 18px; border-top: 1px dashed var(--border);
+  font-size: 11px; color: #777;
+}
+.sb-foot .sf-tag { font-weight: 700; color: #555; margin-right: 6px; }
+
+.sb-filter-bar {
+  background: #fff; padding: 10px 14px; border-radius: 8px;
+  border: 1px solid var(--border); margin-bottom: 12px;
+  box-shadow: var(--shadow);
+}
+
 /* Funnel */
 .funnel-row {
   display: flex; align-items: center; gap: 12px;

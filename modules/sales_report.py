@@ -37,8 +37,9 @@ def render():
     df = df[df["fmt"] == "NEW"].copy()
     target = load_monthly_target()
 
-    tab_write, tab_today, tab_calendar, tab_customers, tab_brands = st.tabs([
+    tab_write, tab_board, tab_today, tab_calendar, tab_customers, tab_brands = st.tabs([
         "✍ 영업 기록 작성",
+        "📋 영업 보드",
         "📝 오늘 보고",
         "📅 캘린더 리포트",
         "👥 고객 (LTV)",
@@ -47,6 +48,8 @@ def render():
 
     with tab_write:
         _render_write_tab()
+    with tab_board:
+        _render_board_tab(df)
     with tab_today:
         _render_today_tab(df, target)
     with tab_calendar:
@@ -55,6 +58,238 @@ def render():
         _render_customers_tab(df)
     with tab_brands:
         _render_brands_tab(df)
+
+
+# ====================================================================
+# Tab 1.5 📋 영업 보드 — 본사 시트 레이아웃의 한눈에 보기 + 필터/검색
+# ====================================================================
+
+_CHANNEL_COLOR = {
+    "내방":   "#C9A961",  # 골드
+    "유선":   "#1976D2",
+    "온라인": "#7B1FA2",
+    "소개":   "#F57C00",
+    "기타":   "#999999",
+}
+_CATEGORY_COLOR = {
+    "소비자":   "#1976D2",
+    "업체":     "#7B1FA2",
+    "디자이너": "#2E7D32",
+    "기타":     "#999999",
+}
+_STATUS_COLOR = {
+    "done":     "#2E7D32",
+    "결제 완료": "#2E7D32",
+    "결제완료":  "#2E7D32",
+    "ing":      "#FF6B35",
+    "예정":     "#1976D2",
+    "보류":     "#F57C00",
+    "취소":     "#999999",
+    "문의":     "#7B1FA2",
+    "재방문":   "#C9A961",
+}
+
+
+def _render_board_tab(df: pd.DataFrame):
+    if not len(df):
+        st.warning("데이터 없음")
+        return
+
+    today = date.today()
+
+    # === 필터 바 ===
+    st.markdown(section_header(
+        "영업 기록 보드", "본사 시트의 일별 블록을 한눈에 + 강력한 필터/검색"
+    ), unsafe_allow_html=True)
+
+    fc1, fc2, fc3 = st.columns([2, 2, 3])
+    period = fc1.selectbox(
+        "📅 기간",
+        ["오늘", "이번주", "이번달", "최근 7일", "최근 30일", "전체", "사용자지정"],
+        index=2, key="board_period"
+    )
+    channel_filter = fc2.multiselect(
+        "📍 채널",
+        sorted([c for c in df["channel"].unique() if c]),
+        default=[], key="board_channel"
+    )
+    search = fc3.text_input(
+        "🔍 검색", placeholder="고객명·내용·담당자·브랜드 어디든", key="board_search"
+    )
+
+    fc4, fc5, fc6 = st.columns([2, 2, 3])
+    category_filter = fc4.multiselect(
+        "🏷 카테고리",
+        sorted([c for c in df["category"].unique() if c]),
+        default=[], key="board_cat"
+    )
+    status_filter = fc5.multiselect(
+        "🚦 상태",
+        sorted([s for s in df["status"].unique() if s]),
+        default=[], key="board_status"
+    )
+    person_options = sorted(set(p for ps in df["persons"] for p in ps if p))
+    person_filter = fc6.multiselect(
+        "👤 담당자",
+        person_options, default=[], key="board_person"
+    )
+
+    # === 기간 필터 적용 ===
+    f = df.copy()
+    if period == "오늘":
+        f = f[f["date"].dt.date == today]
+    elif period == "이번주":
+        week_start = today - timedelta(days=today.weekday())
+        f = f[f["date"].dt.date >= week_start]
+    elif period == "이번달":
+        f = f[f["date"].dt.date >= today.replace(day=1)]
+    elif period == "최근 7일":
+        f = f[f["date"].dt.date >= today - timedelta(days=7)]
+    elif period == "최근 30일":
+        f = f[f["date"].dt.date >= today - timedelta(days=30)]
+    elif period == "사용자지정":
+        cc1, cc2 = st.columns(2)
+        d1 = cc1.date_input("시작", today - timedelta(days=14), key="board_d1")
+        d2 = cc2.date_input("종료", today, key="board_d2")
+        f = f[(f["date"].dt.date >= d1) & (f["date"].dt.date <= d2)]
+
+    if channel_filter:
+        f = f[f["channel"].isin(channel_filter)]
+    if category_filter:
+        f = f[f["category"].isin(category_filter)]
+    if status_filter:
+        f = f[f["status"].isin(status_filter)]
+    if person_filter:
+        f = f[f["persons"].apply(lambda ps: any(p in ps for p in person_filter))]
+    if search:
+        s = search.strip().lower()
+        mask = (
+            f["customer"].astype(str).str.lower().str.contains(s, na=False) |
+            f["content"].astype(str).str.lower().str.contains(s, na=False) |
+            f["person_raw"].astype(str).str.lower().str.contains(s, na=False) |
+            f["brands"].apply(lambda b: any(s in br.lower() for br in (b or [])))
+        )
+        f = f[mask]
+
+    # === 결과 요약 ===
+    total_entries = len(f)
+    paid_f = f[f["amount"] > 0]
+    total_paid = int(paid_f["amount"].sum())
+    n_days = f["date"].dt.date.nunique()
+    rc1, rc2, rc3, rc4 = st.columns(4)
+    rc1.metric("기록 수", f"{total_entries:,}")
+    rc2.metric("결제 건", f"{len(paid_f):,}")
+    rc3.metric("결제 합계", f"₩{total_paid:,}")
+    rc4.metric("커버 일수", f"{n_days}일")
+
+    if not total_entries:
+        st.info("조건에 맞는 기록이 없습니다. 필터를 완화해 주세요.")
+        return
+
+    # === 정렬: 날짜 내림차순 ===
+    sort_opt = st.radio(
+        "정렬",
+        ["최신순", "오래된순", "결제 큰순"],
+        horizontal=True, key="board_sort"
+    )
+
+    # === 날짜별 그룹 카드 렌더 ===
+    grouped = sorted(
+        f.groupby(f["date"].dt.date),
+        key=lambda kv: kv[0],
+        reverse=(sort_opt != "오래된순"),
+    )
+
+    # 결제 큰순 정렬은 그룹 단위로
+    if sort_opt == "결제 큰순":
+        grouped = sorted(
+            grouped,
+            key=lambda kv: int(kv[1][kv[1]["amount"] > 0]["amount"].sum()),
+            reverse=True,
+        )
+
+    # 페이지네이션 — 한 번에 너무 많으면 무거움
+    PAGE_SIZE = 10
+    page = st.number_input(
+        f"페이지 (총 {len(grouped)}일, 페이지당 {PAGE_SIZE}일)",
+        min_value=1, max_value=max((len(grouped) + PAGE_SIZE - 1) // PAGE_SIZE, 1),
+        value=1, step=1, key="board_page",
+    )
+    start, end = (page - 1) * PAGE_SIZE, page * PAGE_SIZE
+
+    for d_obj, day_df in grouped[start:end]:
+        _render_day_card(d_obj, day_df)
+
+
+def _render_day_card(d_obj: date, day_df: pd.DataFrame):
+    weekday = ["월","화","수","목","금","토","일"][d_obj.weekday()]
+    paid_today = day_df[day_df["amount"] > 0]
+    total_paid = int(paid_today["amount"].sum())
+    n_entries = len(day_df)
+
+    # 채널·카테고리별 group 후 정렬 (내방→유선→온라인 / 소비자→업체→디자이너)
+    channel_order = {"내방": 0, "유선": 1, "온라인": 2, "소개": 3, "기타": 4}
+    category_order = {"소비자": 0, "업체": 1, "디자이너": 2, "기타": 3}
+    day_df = day_df.copy()
+    day_df["_ch_o"] = day_df["channel"].map(lambda c: channel_order.get(c, 9))
+    day_df["_ct_o"] = day_df["category"].map(lambda c: category_order.get(c, 9))
+    day_df = day_df.sort_values(["_ch_o", "_ct_o"])
+
+    # 카드 HTML
+    head_html = f"""
+<div class="sb-day">
+  <div class="sb-day-head">
+    <div>
+      <div class="sd-date">{d_obj.strftime('%Y.%m.%d')} ({weekday})</div>
+      <div class="sd-meta">D{(d_obj - date.today()).days:+d} · {(date.today() - d_obj).days}일 전</div>
+    </div>
+    <div class="sd-kpi">
+      <span>유입 <b>{n_entries}팀</b></span>
+      <span>계약 <b>{len(paid_today)}건</b></span>
+      <span>결제 <b>₩{total_paid:,}</b></span>
+    </div>
+  </div>
+"""
+    rows_html = []
+    for r in day_df.itertuples():
+        channel = r.channel or "기타"
+        category = r.category or "기타"
+        status_v = r.status or ""
+        cust = (r.customer or "—").replace("\n", " / ")
+        content = (r.content or "").replace("\n", " ")
+        person = r.person_raw or ""
+        phone = r.phone or ""
+        amount = int(r.amount or 0)
+
+        ch_color = _CHANNEL_COLOR.get(channel, "#999")
+        ct_color = _CATEGORY_COLOR.get(category, "#999")
+        st_color = _STATUS_COLOR.get(status_v, "#999")
+
+        badges = (
+            f'<span class="sb-status" style="background:{ch_color}">{channel}</span>'
+            f'<span class="sb-status" style="background:{ct_color}">{category}</span>'
+        )
+        st_badge = f'<span class="sb-status" style="background:{st_color}">{status_v or "—"}</span>' if status_v else ""
+        amt_html = f'<div class="sb-amount {"zero" if amount == 0 else ""}">₩{amount:,}</div>' if amount else '<div class="sb-amount zero">—</div>'
+        phone_html = f'<div class="sb-phone">☎ {phone}</div>' if phone else ""
+
+        rows_html.append(f"""
+<div class="sb-row">
+  <div class="sb-badges">{badges}</div>
+  <div>{st_badge}</div>
+  <div>
+    <div class="sb-customer">{cust}</div>
+    <div class="sb-content">{content[:200]}{'…' if len(content) > 200 else ''}</div>
+    {phone_html}
+  </div>
+  <div class="sb-person">{person}</div>
+  {amt_html}
+</div>
+""")
+
+    foot_html = '<div class="sb-foot"><span class="sf-tag">💡</span>상세는 본사 시트 참조 · 진행/이슈 메모는 시트 내 유지</div>'
+    full_html = head_html + "".join(rows_html) + foot_html + "</div>"
+    st.markdown(full_html, unsafe_allow_html=True)
 
 
 # ====================================================================
