@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from parsers import load_worklog_df, aggregate_monthly, aggregate_by_person, aggregate_by_brand
+from parsers import load_worklog_df, aggregate_monthly, aggregate_by_person, aggregate_by_brand, load_visitor_trend
 from utils import (
     render_report_section, render_task_widget,
     greeting_header, black_kpi_card, multi_card_row, leaderboard_row,
@@ -120,6 +120,45 @@ def render():
         st.plotly_chart(fig2, use_container_width=True)
     else:
         st.caption("브랜드 멘션 추출 결과 없음")
+
+    # === 내방객 추이 표 (본사 시트 별도 탭) ===
+    st.markdown(section_header(
+        "내방객 추이 (본사 시트 연동)",
+        "내방객 / 견적건 / 결제 전환율 — 단순 내방객 vs 구매 가능 고객"
+    ), unsafe_allow_html=True)
+    vdf = load_visitor_trend()
+    # vdf row 4 = ["", "내방객", "견적건", "결제 전환율", ...]
+    # vdf row 5 = ["단순 내방객", v1, v2, v3, ...]
+    # vdf row 6 = ["구매 가능 고객", v1, v2, v3, ...]
+    has_data = False
+    if len(vdf) >= 3:
+        try:
+            # Row 0: ["", "내방객", "견적건", "결제 전환율", ...]
+            # Row 1: ["단순 내방객", v_방, v_견, v_율, ...]
+            # Row 2: ["구매 가능 고객" (또는 오타 "구내 가능 고객"), v_방, v_견, v_율, ...]
+            header_row = vdf.iloc[0].tolist()
+            metrics = [c for c in header_row[1:4] if c and str(c).strip()]
+            simple_row = vdf.iloc[1].tolist()
+            buying_row = vdf.iloc[2].tolist()
+            simple_vals = [str(simple_row[i+1]).strip() for i in range(len(metrics))]
+            buying_vals = [str(buying_row[i+1]).strip() for i in range(len(metrics))]
+            has_data = any(v and v not in ("nan","") for v in simple_vals + buying_vals)
+            if has_data:
+                vt_df = pd.DataFrame({
+                    "구분": [str(simple_row[0]).strip() or "단순 내방객",
+                              str(buying_row[0]).strip() or "구매 가능 고객"],
+                    **{metrics[i]: [simple_vals[i] or "—", buying_vals[i] or "—"]
+                       for i in range(len(metrics))},
+                })
+                st.dataframe(vt_df, hide_index=True, use_container_width=True)
+        except Exception:
+            has_data = False
+    if not has_data:
+        st.markdown(alert_banner(
+            "내방객 추이 표 데이터 미입력",
+            "본사 시트 '내방객 추이 표' 탭(B4:D6)에 단순 내방객/구매 가능 고객별 내방·견적·전환율을 입력하면 자동 활성화됩니다.",
+            level="blue", icon="ℹ"
+        ), unsafe_allow_html=True)
 
     # === 최근 활동 테이블 ===
     st.markdown(section_header("Recent Activities", "최근 15건"), unsafe_allow_html=True)

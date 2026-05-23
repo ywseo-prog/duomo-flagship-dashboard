@@ -15,6 +15,7 @@ SHEET_ID = "1enUaMwY092nn27BDTxvHCz9hmrZRVIxXTSU3JKjmw64"
 WORKLOG_TAB = "플래그십 업무일지"
 CS_TAB = "CS 상담 이력(현진님)"
 CLAIM_TAB = "브랜드 클레임노트 (혁진)"
+VISITOR_TAB = "내방객 추이 표"
 
 COL = {"channel":0, "category":1, "status":2, "customer":3, "phone":4, "content":5, "person":8, "amount":9}
 DATE_RE = re.compile(r"^(20\d{2})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})")
@@ -141,3 +142,73 @@ def aggregate_by_brand(df):
         sales=("amount","sum"),
     ).sort_values("mention_count", ascending=False)
     return g.reset_index()
+
+
+# ===== 월 목표 매출 / 누적 매출 / 달성률 (시트 1-2행) =====
+def parse_monthly_target(csv_text):
+    """플래그십 업무일지 1-2행에서 월 목표 매출 + 당일 누적 + 달성률 추출.
+    시트가 이미 계산해놓은 값을 그대로 읽음."""
+    import csv as _csv
+    reader = _csv.reader(StringIO(csv_text))
+    rows = list(reader)
+    if len(rows) < 2:
+        return None
+    h, v = rows[0], rows[1]
+    result = {
+        "month": None, "target": None, "achieved": None,
+        "achievement_rate": None,
+        "raw_target_text": None, "raw_achieved_text": None, "raw_rate_text": None,
+    }
+    for i, cell in enumerate(h):
+        cell_s = (cell or "").strip()
+        val_s = (v[i] if i < len(v) else "").strip()
+        if not cell_s:
+            continue
+        # "5월 목표 매출"
+        m = re.search(r"(\d+)\s*월\s*목표\s*매출", cell_s)
+        if m:
+            result["month"] = int(m.group(1))
+            result["raw_target_text"] = val_s
+            num = re.sub(r"[^\d]", "", val_s)
+            if num:
+                result["target"] = int(num)
+            continue
+        # "금일 기준 매출 총 합" / "당일 매출" / "오늘 매출" — 누적
+        if "매출" in cell_s and any(k in cell_s for k in ["총 합", "총합", "당일", "오늘", "금일", "누적"]):
+            result["raw_achieved_text"] = val_s
+            num = re.sub(r"[^\d]", "", val_s)
+            if num:
+                result["achieved"] = int(num)
+            continue
+        # "달성률"
+        if "달성률" in cell_s or "달성율" in cell_s:
+            result["raw_rate_text"] = val_s
+            m = re.search(r"([\d.]+)", val_s)
+            if m:
+                try:
+                    result["achievement_rate"] = float(m.group(1))
+                except ValueError:
+                    pass
+    return result
+
+
+@st.cache_data(ttl=300)
+def load_monthly_target():
+    """월 목표 매출 / 누적 / 달성률 로드. 실패 시 None."""
+    try:
+        csv = fetch_sheet_csv(WORKLOG_TAB)
+        return parse_monthly_target(csv)
+    except Exception:
+        return None
+
+
+# ===== 내방객 추이 표 (별도 탭) =====
+@st.cache_data(ttl=300)
+def load_visitor_trend():
+    """'내방객 추이 표' 탭 raw fetch. 현재 데이터 미입력 → 빈 DataFrame 또는 헤더만."""
+    try:
+        csv = fetch_sheet_csv(VISITOR_TAB)
+        df = pd.read_csv(StringIO(csv), header=None, dtype=str, keep_default_na=False)
+        return df
+    except Exception:
+        return pd.DataFrame()

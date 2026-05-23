@@ -1,13 +1,16 @@
-"""모듈 3: 매출 (시안 2 Finexy multi-wallet + 시안 4 VIP 도넛)"""
+"""모듈 3: 매출 (시안 2 Finexy multi-wallet + 시안 4 VIP 도넛 + 본사 시트 목표 매출)"""
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from parsers import load_worklog_df, aggregate_monthly
+from datetime import date
+from calendar import monthrange
+from parsers import load_worklog_df, aggregate_monthly, load_monthly_target
 from utils import (
     render_report_section, render_task_widget,
     greeting_header, black_kpi_card, multi_card_row, leaderboard_row, section_header,
+    alert_banner,
 )
 
 def render():
@@ -20,6 +23,59 @@ def render():
     df = df[df["fmt"]=="NEW"].copy()
     paid = df[df["amount"]>0].copy()
     render_report_section("매출", paid, period_col="date")
+
+    # === 본사 시트 목표 매출 (시트 1-2행) ===
+    target_info = load_monthly_target()
+    if target_info and target_info.get("target"):
+        today = date.today()
+        days_in_month = monthrange(today.year, today.month)[1]
+        days_passed = today.day
+        days_left = days_in_month - days_passed
+        rate = target_info.get("achievement_rate") or 0
+        # 시트의 누적값이 있으면 시트 값을 신뢰, 없으면 worklog에서 계산
+        achieved = target_info.get("achieved")
+        if not achieved:
+            this_month_paid = paid[paid["ym"] == f"{today.year}-{today.month:02d}"]
+            achieved = int(this_month_paid["amount"].sum())
+            if target_info["target"]:
+                rate = achieved / target_info["target"] * 100
+        target_val = target_info["target"]
+        remaining = max(target_val - achieved, 0)
+        pace_needed = remaining / max(days_left, 1)
+        trend = "up" if rate >= 100 else ("gold" if rate >= (days_passed/days_in_month*100) else "down")
+
+        st.markdown(section_header(
+            f"🎯 {target_info['month']}월 목표 매출 추적",
+            f"본사 시트 1-2행 자동 연동 · D-{days_left} 잔여",
+        ), unsafe_allow_html=True)
+        gcols = st.columns(4)
+        gcols[0].markdown(black_kpi_card(
+            "월 목표", f"₩{target_val/1e8:.2f}억",
+            f"({target_val:,})", "gold", "🎯"
+        ), unsafe_allow_html=True)
+        gcols[1].markdown(black_kpi_card(
+            "누적 달성", f"₩{achieved/1e8:.2f}억",
+            f"({achieved:,})", trend, "💰"
+        ), unsafe_allow_html=True)
+        gcols[2].markdown(black_kpi_card(
+            "달성률", f"{rate:.1f}%",
+            f"진척 기준 {days_passed/days_in_month*100:.0f}%", trend, "📊"
+        ), unsafe_allow_html=True)
+        gcols[3].markdown(black_kpi_card(
+            "잔여 페이스", f"₩{pace_needed/1e6:.1f}M/일",
+            f"잔여 {days_left}일 · ₩{remaining:,}", "neutral", "⏱"
+        ), unsafe_allow_html=True)
+
+        if rate >= 100:
+            st.markdown(alert_banner(
+                f"🏆 {target_info['month']}월 목표 달성 ({rate:.1f}%)",
+                "초과 달성 매출은 누적 보너스 KPI에 반영됩니다.",
+                level="green", icon="🏆"), unsafe_allow_html=True)
+        elif rate < days_passed / days_in_month * 100 - 10:
+            st.markdown(alert_banner(
+                f"⚠ 목표 페이스 미달 — 잔여 {days_left}일 동안 일평균 ₩{pace_needed/1e6:.1f}M 필요",
+                f"현재 달성률 {rate:.1f}% / 진척률 {days_passed/days_in_month*100:.0f}%",
+                level="orange", icon="⚠"), unsafe_allow_html=True)
 
     # === Black KPI 4종 ===
     total = int(paid["amount"].sum())
