@@ -267,6 +267,82 @@ div[data-testid="stMetricLabel"] { font-size: 11px !important; letter-spacing: 0
   box-shadow: var(--shadow);
 }
 
+/* 업무일지 일별 카드 — 스프레드시트 1:1 재현 */
+.wl-day-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0; margin-bottom: 6px;
+}
+.wl-day-meta .wm-kpi { display: flex; gap: 22px; font-size: 13px; }
+.wl-day-meta .wm-kpi b { font-family: 'Inter',sans-serif; color: #C9A961; margin-left: 6px; font-weight: 700; }
+
+.wl-channel {
+  margin: 10px 0 6px 0; padding-left: 8px;
+  border-left: 4px solid var(--accent-gold);
+  font-weight: 700; font-size: 14px; color: #0A0A0A;
+}
+.wl-channel.phone { border-left-color: #1976D2; }
+.wl-channel.online { border-left-color: #7B1FA2; }
+.wl-channel.intro { border-left-color: #F57C00; }
+
+.wl-category {
+  margin: 6px 0 4px 18px; padding-left: 10px;
+  border-left: 2px dashed #BBB; font-size: 12px;
+  color: #555; font-weight: 600; letter-spacing: 0.3px;
+}
+
+.wl-record {
+  display: grid; grid-template-columns: 92px 1fr 110px 110px;
+  gap: 10px; padding: 8px 12px; margin: 4px 0 4px 36px;
+  background: #FAFAFA; border-radius: 6px;
+  border-left: 3px solid #E8E8E8;
+  font-size: 12.5px; align-items: flex-start;
+}
+.wl-record:hover { background: #F0F0F0; }
+.wl-record .wr-status {
+  font-family: 'Inter',sans-serif; font-size: 10px; font-weight: 700;
+  letter-spacing: 0.5px; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 3px; color: #fff;
+  text-align: center; align-self: center;
+}
+.wl-record .wr-body .wr-customer {
+  font-weight: 700; color: #0A0A0A; font-size: 13.5px;
+}
+.wl-record .wr-body .wr-phone {
+  font-family: 'Inter',sans-serif; font-size: 11px; color: #999;
+  margin-left: 8px;
+}
+.wl-record .wr-body .wr-content {
+  color: #555; font-size: 12px; margin-top: 3px; line-height: 1.5;
+}
+.wl-record .wr-body .wr-brands {
+  font-size: 10px; color: #C9A961; font-weight: 600;
+  letter-spacing: 0.3px; margin-top: 3px;
+}
+.wl-record .wr-person {
+  font-size: 11px; text-align: right; padding-top: 2px;
+}
+.wl-record .wr-person .wp-badge {
+  display: inline-block; padding: 3px 8px; border-radius: 3px;
+  color: #fff; font-weight: 700; font-size: 10px;
+  letter-spacing: 0.3px;
+}
+.wl-record .wr-amount {
+  font-family: 'Inter',sans-serif; font-size: 14px; font-weight: 700;
+  text-align: right; color: #C9A961;
+}
+.wl-record .wr-amount.zero { color: #BBB; font-weight: 400; }
+
+.wl-memo-box {
+  background: #FAF7F0; border: 1px solid #EEE6D5;
+  border-radius: 8px; padding: 10px 14px; margin: 8px 0 4px 0;
+  font-size: 12px; color: #5D4037;
+}
+.wl-memo-box.issue { background: #FDECEC; border-color: #F5C2C2; color: #5D1F1F; }
+.wl-memo-box .wm-tag {
+  font-weight: 700; margin-right: 8px; font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
 /* Funnel */
 .funnel-row {
   display: flex; align-items: center; gap: 12px;
