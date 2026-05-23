@@ -144,6 +144,103 @@ def aggregate_by_brand(df):
     return g.reset_index()
 
 
+def aggregate_by_customer(df):
+    """고객별 집계 — 영업보고 모듈용. 방문/누적/최근/대표 카테고리"""
+    if not len(df): return pd.DataFrame()
+    work = df[df["customer"].astype(str).str.strip() != ""].copy()
+    if not len(work): return pd.DataFrame()
+    work["customer_norm"] = work["customer"].astype(str).str.strip().str.split("/").str[0].str.strip()
+    work = work[work["customer_norm"] != ""]
+    g = work.groupby("customer_norm").agg(
+        phone=("phone", lambda s: next((x for x in s if str(x).strip()), "")),
+        category=("category", lambda s: s.mode().iloc[0] if len(s.mode()) else ""),
+        channel=("channel", lambda s: s.mode().iloc[0] if len(s.mode()) else ""),
+        visits=("date", "count"),
+        sales=("amount", "sum"),
+        last_visit=("date", "max"),
+    ).reset_index().rename(columns={"customer_norm": "customer"})
+    g = g.sort_values("last_visit", ascending=False)
+    return g
+
+
+def daily_report_data(df, target_date):
+    """특정 날짜의 영업보고용 데이터 산출. target_date: datetime.date"""
+    if not len(df): return None
+    work = df.copy()
+    today_df = work[work["date"].dt.date == target_date]
+    ym = f"{target_date.year}-{target_date.month:02d}"
+    month_df = work[work["ym"] == ym]
+    paid_today = today_df[today_df["amount"] > 0]
+    paid_month = month_df[month_df["amount"] > 0]
+
+    walk_in = int((today_df["channel"] == "내방").sum())
+    return {
+        "date": target_date,
+        "ym": ym,
+        "total_entries": int(len(today_df)),
+        "walk_in": walk_in,
+        "paid_count_today": int(len(paid_today)),
+        "paid_sum_today": int(paid_today["amount"].sum()),
+        "paid_sum_month": int(paid_month["amount"].sum()),
+        "paid_count_month": int(len(paid_month)),
+        "paid_today_df": paid_today,
+        "consult_today_df": today_df[today_df["amount"] == 0],
+    }
+
+
+def format_katalk_report(data, store_name="조명 플래그십"):
+    """일일 영업보고 → 카톡 발송용 텍스트 (참조: sales-report-ivory.vercel.app)"""
+    if not data: return ""
+    d = data["date"]
+    weekday_kor = ["월","화","수","목","금","토","일"][d.weekday()]
+    lines = [
+        f"{d.month:02d}/{d.day:02d}({weekday_kor}) {store_name} 영업보고",
+        "",
+        "1. 유입/계약",
+        f"- 유입 {data['total_entries']}팀",
+        f"   (워크인 {data['walk_in']} / 계약 {data['paid_count_today']})",
+        "",
+        f"2. {d.month:02d}월 누적 수주액",
+        f"- {data['paid_sum_month']:,}원",
+        "",
+        "3. 금일 계약 총액",
+        f"- {data['paid_sum_today']:,}원",
+        "",
+        "4. 계약건 세부 내용",
+    ]
+    if data["paid_count_today"] == 0:
+        lines.append("- (없음)")
+    else:
+        for row in data["paid_today_df"].itertuples():
+            cust = (row.customer or "").strip().split("/")[0].strip() or "—"
+            person = (row.person_raw or "").strip() or "—"
+            content = (row.content or "").strip().replace("\n", " ")
+            lines.extend([
+                f"- {cust} 고객",
+                f"  담당 : {person}",
+                f"  금액 : {int(row.amount):,}원",
+                f"  내용 : {content}",
+                "",
+            ])
+    lines.append("5. 주요 상담")
+    consult_df = data["consult_today_df"]
+    if not len(consult_df):
+        lines.append("- (없음)")
+    else:
+        # 상위 5건만 (간결성)
+        for row in consult_df.head(5).itertuples():
+            cust = (row.customer or "").strip().split("/")[0].strip() or "—"
+            person = (row.person_raw or "").strip() or "—"
+            content = (row.content or "").strip().replace("\n", " ")[:80]
+            lines.extend([
+                f"- 고객 : {cust}",
+                f"- 담당 : {person}",
+                f"- 내용 : {content}",
+                "",
+            ])
+    return "\n".join(lines).rstrip()
+
+
 # ===== 월 목표 매출 / 누적 매출 / 달성률 (시트 1-2행) =====
 def parse_monthly_target(csv_text):
     """플래그십 업무일지 1-2행에서 월 목표 매출 + 당일 누적 + 달성률 추출.
