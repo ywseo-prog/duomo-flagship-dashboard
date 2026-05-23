@@ -2,6 +2,7 @@
 ※ Slack 발송은 사용자 결정으로 제외. 대시보드 시각화 + Notion 이력 DB만 운영.
    상세 스펙: inbound_alert_module/docs/01~04, README.md (zip 패키지 인수)
 """
+from __future__ import annotations  # PEP 604 (`X | None`) 호환 — Python 3.9 이하 대응
 import streamlit as st
 import pandas as pd
 import re
