@@ -1,18 +1,4 @@
-"""AG-Grid JsCode 셀 렌더러 v1.0 — 스펙 인계 verbatim
-
-[6종 핵심 렌더러 — 스펙 그대로]
-1. CHANNEL_BADGE
-2. CATEGORY_BADGE
-3. STATUS_CLASS_RULES (cellClassRules dict)
-4. AMOUNT_CELL_STYLE
-5. ROW_STYLE
-6. DATE_HEADER_RENDERER
-
-[추가 헬퍼 (호환성)]
-- AMOUNT_FORMATTER: 금액 ₩ 한국 포맷
-- PERSON_BADGE: 담당자 핑크 배지 (옵션)
-- STATUS_CELL_STYLE / AMOUNT_STYLE / ROW_TYPE_STYLE: 레거시 alias
-"""
+"""AG-Grid JsCode 셀 렌더러 — 스펙 인계 6종 verbatim (그 외 없음)"""
 from st_aggrid import JsCode
 
 
@@ -71,7 +57,7 @@ function(p){
 """)
 
 
-# (6) 일자 헤더 그룹 렌더러
+# (6) 일자 헤더 그룹 렌더러 (이전 가이드 참조)
 DATE_HEADER_RENDERER = JsCode("""
 class DateHeaderRenderer {
   init(p){
@@ -89,37 +75,3 @@ class DateHeaderRenderer {
   getGui(){ return this.eGui; }
 }
 """)
-
-
-# ============================================================
-# 부가 헬퍼 (modules/worklog.py에서 사용)
-# ============================================================
-
-# 금액 ₩ 한국 포맷 (valueFormatter)
-AMOUNT_FORMATTER = JsCode("""
-function(p){
-  if (p.value == null || p.value === '' || p.value === 0) return '';
-  const n = parseInt(p.value, 10);
-  if (isNaN(n)) return p.value;
-  return '₩' + n.toLocaleString('ko-KR');
-}
-""")
-
-
-# 담당자 핑크 배지 (cellClass='person-cell' CSS와 함께 사용)
-PERSON_BADGE = JsCode("""
-function(p) {
-    if (!p.value) return '';
-    return `<span style="display:inline-flex;align-items:center;
-      padding:2px 10px;border-radius:14px;font-size:11px;font-weight:500;
-      background:#FBEAF0;color:#993556;border:1px solid #ED93B1">${p.value}</span>`;
-}
-""")
-
-
-# ============================================================
-# 레거시 alias (이전 import 경로 호환)
-# ============================================================
-STATUS_CELL_STYLE = AMOUNT_CELL_STYLE  # 사용처 없으면 무시 가능
-AMOUNT_STYLE = AMOUNT_CELL_STYLE
-ROW_TYPE_STYLE = ROW_STYLE

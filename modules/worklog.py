@@ -193,8 +193,7 @@ def _render_grid_view(parsed: dict, f: pd.DataFrame):
         from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
         from components import (
             DATE_HEADER_RENDERER, CHANNEL_BADGE, CATEGORY_BADGE,
-            STATUS_CLASS_RULES, AMOUNT_FORMATTER, AMOUNT_CELL_STYLE,
-            ROW_STYLE, PERSON_BADGE,
+            STATUS_CLASS_RULES, AMOUNT_CELL_STYLE, ROW_STYLE,
         )
     except ImportError as e:
         st.error(f"**streamlit-aggrid 또는 components 미설치/오류**: {e}")
@@ -268,12 +267,13 @@ def _render_grid_view(parsed: dict, f: pd.DataFrame):
         "person", editable=True, width=140,
         cellEditor="agSelectCellEditor",
         cellEditorParams={"values": PERSONS},
-        cellRenderer=PERSON_BADGE,
+        cellClass="person-cell",
         headerName="담당자",
     )
     gb.configure_column(
         "amount", editable=True, width=130, type=["numericColumn"],
-        cellStyle=AMOUNT_CELL_STYLE, valueFormatter=AMOUNT_FORMATTER,
+        cellStyle=AMOUNT_CELL_STYLE,
+        valueFormatter="value ? '₩' + value.toLocaleString() : ''",
         headerName="매출",
     )
 
