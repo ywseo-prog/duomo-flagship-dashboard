@@ -1,6 +1,7 @@
 # Streamlit Cloud 배포 가이드 (5단계)
 
-Duomo Flagship Dashboard v0.4를 영구 URL `https://duomo-flagship.streamlit.app` 로 배포합니다.
+Duomo Flagship Dashboard v0.5를 영구 URL `https://duomo-flagship.streamlit.app` 로 배포합니다.
+(GitHub push 시 자동 재배포 ~1분)
 
 ---
 
@@ -84,6 +85,9 @@ TASKS_DB_ID = "d0f673d9-dc62-4f20-9a6b-1090d96a5313"
 # === 회의록 (플래그십 전용 신규 생성 - notion_setup_guide.md Step 5) ===
 MEETING_DB_ID = "여기에-새로만든-회의록-DB-ID"
 
+# === 입고알람 이력 (플래그십 전용 신규 생성 - notion_setup_guide.md Step 5-B) ===
+INBOUND_HISTORY_DB_ID = "여기에-새로만든-입고알람이력-DB-ID"
+
 # === 발주: Notion 미연동 (발주시스템 v3 외부 운영) ===
 
 # === Google Sheets (선택) ===
@@ -153,6 +157,7 @@ App settings → Secrets → 수정 → Save → 자동 reboot.
 |---|---|---|
 | 2026-05-23 | v0.4 | 초기 배포 — 7개 모듈, Notion 양방향, 디자인 시안 5종 반영 |
 | 2026-05-23 | v0.4.1 | 발주 Notion 연동 제외 / 캘린더 실 DB ID 등록 / 회의록 플래그십 전용 분리 |
+| 2026-05-23 | v0.5   | 입고 추적 모듈(8번째) 추가 — 진행일지 .xlsx 업로드, 4인 매칭, D-14 임박/완료/지연 분류, Notion 발송이력 DB |
 
 ---
 

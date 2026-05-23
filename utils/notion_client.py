@@ -17,6 +17,8 @@ DEFAULT_DB_IDS = {
     # 회의록: 기존 통합본 → 플래그십 전용 신규 DB 사용 권장 (secrets로 override)
     "meeting":  "",
     "calendar": "",
+    # 입고알람 발송이력 — 사용자가 신규 생성, INBOUND_HISTORY_DB_ID로 등록
+    "inbound_history": "",
 }
 
 CATEGORY_COLORS = {
@@ -86,6 +88,7 @@ def get_db_id(key: str) -> str:
     secret_key = {
         "orders": "ORDERS_DB_ID", "tasks": "TASKS_DB_ID",
         "meeting": "MEETING_DB_ID", "calendar": "CALENDAR_DB_ID",
+        "inbound_history": "INBOUND_HISTORY_DB_ID",
     }.get(key)
     val = _get_secret(secret_key) if secret_key else None
     return _normalize_db_id(val or DEFAULT_DB_IDS.get(key, ""))
@@ -296,6 +299,75 @@ def render_task_widget(module_name: str):
                 create_task(title=f"[{module_name}] {title}", priority=prio, due=str(due))
                 st.success("저장됨")
                 st.rerun()
+
+
+# ===== 입고알람 발송이력 DB =====
+INBOUND_MEMBERS = ["서영완", "조이경", "윤소담", "추승민"]
+INBOUND_ALARM_TYPES = ["입항임박_D14", "입고완료"]
+
+
+def make_inbound_alarm_key(po_no: str, member: str, alarm_type: str) -> str:
+    """중복 발송 방지용 unique key"""
+    return f"{(po_no or '').strip()}__{member}__{alarm_type}"
+
+
+@st.cache_data(ttl=300)
+def fetch_inbound_history() -> pd.DataFrame:
+    """발송이력 DB 조회"""
+    client = get_notion_client()
+    db_id = get_db_id("inbound_history")
+    if not client or not db_id:
+        return pd.DataFrame(columns=["알람키","담당자","알람유형","Supplier","Project","PO No.","ETA","입고일","발송일시","상태"])
+    try:
+        results = client.databases.query(database_id=db_id, page_size=100).get("results", [])
+        rows = []
+        for r in results:
+            d = _props_to_dict(r.get("properties", {}))
+            d["_id"] = r.get("id")
+            rows.append(d)
+        return pd.DataFrame(rows)
+    except Exception as e:
+        st.warning(f"발송이력 조회 실패: {e}")
+        return pd.DataFrame()
+
+
+def record_inbound_history(alarm_key: str, member: str, alarm_type: str,
+                            supplier: str = "", project: str = "", po_no: str = "",
+                            eta: str = "", inbound_date: str = "", note: str = "") -> bool:
+    """발송이력 DB에 row 추가 — 중복(알람키)이면 skip"""
+    client = get_notion_client()
+    db_id = get_db_id("inbound_history")
+    if not client or not db_id:
+        return False
+    try:
+        # 중복 체크
+        existing = client.databases.query(
+            database_id=db_id,
+            filter={"property": "알람키", "title": {"equals": alarm_key}},
+            page_size=1,
+        ).get("results", [])
+        if existing:
+            return False  # 이미 기록됨
+
+        props = {
+            "알람키":    {"title": [{"text": {"content": alarm_key}}]},
+            "담당자":    {"select": {"name": member}},
+            "알람유형":  {"select": {"name": alarm_type}},
+            "Supplier":  {"rich_text": [{"text": {"content": supplier or ""}}]},
+            "Project":   {"rich_text": [{"text": {"content": project or ""}}]},
+            "PO No.":    {"rich_text": [{"text": {"content": po_no or ""}}]},
+            "발송일시":  {"date": {"start": datetime.now().isoformat()}},
+            "상태":      {"select": {"name": "기록완료"}},
+        }
+        if eta: props["ETA"] = {"date": {"start": eta}}
+        if inbound_date: props["입고일"] = {"date": {"start": inbound_date}}
+        if note: props["비고"] = {"rich_text": [{"text": {"content": note}}]}
+        client.pages.create(parent={"database_id": db_id}, properties=props)
+        fetch_inbound_history.clear()
+        return True
+    except Exception as e:
+        st.warning(f"발송이력 기록 실패: {e}")
+        return False
 
 
 # ===== 더미 데이터 (토큰 미설정 시 시연용) =====
