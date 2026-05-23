@@ -1,20 +1,17 @@
-"""모듈 2: 업무일지 v0.9 — 5-RowType parser + AG-Grid 3-level rowGroup
+"""모듈 2: 업무일지 v1.0 — 디자인 토큰 분리 + 4종 행 추가 + session_state
 
-[원본 5-Row-Type]
-① DATE_HEADER   날짜+담당자+내방팀수
-② CATEGORY_META "카테고리" 라벨 + 일자 총매출 (J열)
-③ RECORD        상담 레코드
-④ PROGRESS      진행사항
-⑤ ISSUE         이슈사항
+[v1.0 스펙 변경]
+- constants/design_tokens.py에서 컬러·옵션 import
+- STATUSES 4종 (done/ing/결제 완료/to do) — 단순화
+- CHANNELS 2종 (내방/유선), CATEGORIES 2종 (소비자/업체)
+- PERSONS 4인 (직책 포함, 시트 호환)
+- 행 추가 버튼 4종 (내방·소비자 / 내방·업체 / 유선·소비자 / 유선·업체)
+- session_state로 편집 보존 (rerun 시 초기화 방지)
+- cellClassRules + GRID_CSS로 라운드 배지
 
-[UI]
-- AG-Grid 3-level rowGroup (date → channel → category)
-- DATE_HEADER 그룹 헤더 컴포넌트 (담당자/내방팀수/결제금액)
-- 진행/이슈 행: row_type 컬러 배경
-- 셀 더블클릭 편집 + 변경 감지 → services/sheets_sync.push_changes
-
-데이터: parsers.load_worklog_v2() → dict
-저장:  services.sheets_sync.push_changes() → gspread batch_update
+[데이터]
+parsers.load_worklog_v2() → dict → flatten_for_aggrid() → 평면 DataFrame
+services.sheets_sync.push_changes() → 본사 시트 batch_update
 """
 from __future__ import annotations
 import streamlit as st
@@ -27,14 +24,16 @@ from calendar import monthrange
 import re
 
 from parsers import (
-    load_worklog_df, load_worklog_v2,
+    load_worklog_df, load_worklog_v2, flatten_for_aggrid,
     aggregate_monthly, aggregate_by_person, aggregate_by_brand,
     aggregate_by_customer, load_monthly_target, load_visitor_trend,
-    CHANNEL_OPTIONS, CATEGORY_OPTIONS, STATUS_OPTIONS,
 )
 from services.sheets_sync import (
     has_service_account, push_changes, append_row,
     SHEET_ID, WORKLOG_TAB,
+)
+from constants import (
+    COLORS, PERSONS, STATUSES, CHANNELS, CATEGORIES, GRID_CSS,
 )
 from utils import (
     render_report_section, render_task_widget,
@@ -46,8 +45,11 @@ VIP_THRESHOLD = 3_000_000
 
 
 def render():
+    # CSS 토큰 inject (그리드 진입 전)
+    st.markdown(GRID_CSS, unsafe_allow_html=True)
+
     greeting_header(
-        "서영완", role="조명플래그십파트 · 업무일지 (5-RowType + AG-Grid)",
+        "서영완", role="조명플래그십파트 · 업무일지 v1.0 (디자인 토큰)",
         page_title="📊 업무일지",
     )
 
@@ -62,7 +64,7 @@ def render():
     df_all = df_all.copy()
     target = load_monthly_target()
 
-    # === 1. 상단 1줄 KPI 4 ===
+    # === 1. 상단 KPI ===
     _render_compact_kpi(df_all, parsed.get("header") or {}, target)
 
     # === 2. 뷰 토글 ===
@@ -71,7 +73,7 @@ def render():
         horizontal=True, label_visibility="collapsed", key="wl_view",
     )
 
-    # === 3. 검색·필터 (한 줄) ===
+    # === 3. 검색·필터 ===
     f = _render_search_bar(df_all)
 
     if view == "📅 일별 (시트 편집)":
@@ -85,7 +87,7 @@ def render():
 
 
 # ============================================================
-# KPI 4 (compact, 1줄)
+# KPI 1줄
 # ============================================================
 def _render_compact_kpi(df: pd.DataFrame, header: dict, target: dict | None):
     today = date.today()
@@ -95,7 +97,6 @@ def _render_compact_kpi(df: pd.DataFrame, header: dict, target: dict | None):
     cur_sales = int(paid_month["amount"].sum())
     active_days = month_df["date"].dt.date.nunique()
     daily_avg = cur_sales // max(active_days, 1) if active_days else 0
-    # 시트 헤더 직접값 우선
     target_val = header.get("month_target") or (target.get("target") if target else None)
     sheet_total = header.get("current_total")
     rate = (header.get("achievement") * 100) if header.get("achievement") else \
@@ -112,7 +113,6 @@ def _render_compact_kpi(df: pd.DataFrame, header: dict, target: dict | None):
             st.markdown(black_kpi_card("목표", "—", "미입력", "neutral", "🎯"),
                         unsafe_allow_html=True)
     with cols[1]:
-        # 시트 헤더 vs 산정값 비교
         show_val = sheet_total if sheet_total else cur_sales
         sub = "본사 시트 헤더" if sheet_total else "산정"
         st.markdown(black_kpi_card(
@@ -129,10 +129,8 @@ def _render_compact_kpi(df: pd.DataFrame, header: dict, target: dict | None):
                 f"진척 {pace:.0f}%", trend, "📊",
             ), unsafe_allow_html=True)
         else:
-            conv = len(paid_month) / max(len(month_df), 1) * 100
-            st.markdown(black_kpi_card(
-                "전환률", f"{conv:.1f}%", "결제/상담", "neutral", "📊",
-            ), unsafe_allow_html=True)
+            st.markdown(black_kpi_card("달성률", "—", "목표 미입력", "neutral", "📊"),
+                        unsafe_allow_html=True)
     with cols[3]:
         st.markdown(black_kpi_card(
             "이번달 일평균", f"₩{daily_avg/1e6:.1f}M",
@@ -141,7 +139,7 @@ def _render_compact_kpi(df: pd.DataFrame, header: dict, target: dict | None):
 
 
 # ============================================================
-# 검색·필터 (한 줄, 항상 노출)
+# 검색·필터
 # ============================================================
 def _render_search_bar(df: pd.DataFrame) -> pd.DataFrame:
     f = df.copy()
@@ -188,84 +186,19 @@ def _render_search_bar(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================
-# Flatten v2 dict → AG-Grid 평면 DataFrame
-# ============================================================
-def flatten_for_aggrid(parsed: dict, filter_df: pd.DataFrame) -> pd.DataFrame:
-    """v2 dict + 필터된 df의 sheet_row 교집합 → 평면 DataFrame.
-
-    row_type 컬럼 포함:
-    - 'record'   : 일반 상담 행
-    - 'progress' : 진행사항
-    - 'issue'    : 이슈사항
-    DATE_HEADER는 AG-Grid의 rowGroup이 자동 생성하므로 별도 행 미포함.
-    """
-    filter_rows = set(filter_df["_sheet_row"].tolist()) if "_sheet_row" in filter_df.columns else None
-    rows = []
-    for d in parsed.get("dates", []):
-        # 해당 일자의 records가 필터에 하나라도 있어야 그 블록 표시
-        date_records = d.get("records", [])
-        if filter_rows is not None:
-            date_records = [r for r in date_records if r["_sheet_row"] in filter_rows]
-        if not date_records:
-            continue
-        meta = d.get("meta", {})
-        for r in date_records:
-            rows.append({
-                "row_type": "record",
-                "date": d["date"],
-                "_sheet_row": r["_sheet_row"],
-                "_meta": meta,  # 그룹 헤더 렌더러용
-                "channel": r.get("channel") or "",
-                "category": r.get("category") or "",
-                "status": r.get("status") or "",
-                "customer": r.get("customer") or "",
-                "phone": r.get("phone") or "",
-                "content": r.get("content") or "",
-                "person_raw": r.get("person_raw") or "",
-                "amount": int(r.get("amount") or 0),
-            })
-        # 진행/이슈는 필터 결과와 무관하게 같은 블록이 보일 때만
-        for p in d.get("progress", []):
-            rows.append({
-                "row_type": "progress", "date": d["date"], "_meta": meta,
-                "channel": "", "category": "", "status": "📝 진행사항",
-                "customer": "", "phone": "", "content": p,
-                "person_raw": "", "amount": 0, "_sheet_row": -1,
-            })
-        for i in d.get("issues", []):
-            rows.append({
-                "row_type": "issue", "date": d["date"], "_meta": meta,
-                "channel": "", "category": "", "status": "⚠ 이슈사항",
-                "customer": "", "phone": "", "content": i,
-                "person_raw": "", "amount": 0, "_sheet_row": -1,
-            })
-    df = pd.DataFrame(rows)
-    # 같은 블록 내 channel/category forward-fill (셀 병합 효과)
-    if len(df):
-        # record 행만 ffill (progress/issue는 빈 채로)
-        rec_mask = df["row_type"] == "record"
-        for col in ["channel", "category"]:
-            df.loc[rec_mask, col] = (
-                df[rec_mask].groupby("date")[col]
-                .transform(lambda s: s.replace("", pd.NA).ffill().fillna(""))
-            )
-    return df
-
-
-# ============================================================
-# AG-Grid 메인 뷰
+# AG-Grid 메인 뷰 (v1.0 토큰 + 4종 행 추가)
 # ============================================================
 def _render_grid_view(parsed: dict, f: pd.DataFrame):
     try:
-        from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+        from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
         from components import (
             DATE_HEADER_RENDERER, CHANNEL_BADGE, CATEGORY_BADGE,
-            STATUS_CELL_STYLE, AMOUNT_FORMATTER, AMOUNT_STYLE,
-            ROW_TYPE_STYLE, PERSON_BADGE,
+            STATUS_CLASS_RULES, AMOUNT_FORMATTER, AMOUNT_CELL_STYLE,
+            ROW_STYLE, PERSON_BADGE,
         )
     except ImportError as e:
         st.error(f"**streamlit-aggrid 또는 components 미설치/오류**: {e}")
-        st.caption("Streamlit Cloud는 requirements.txt push 시 자동 설치됩니다. fallback 표 모드:")
+        st.caption("requirements.txt push 시 자동 설치됩니다. fallback 표:")
         _render_fallback_table(f)
         return
 
@@ -273,171 +206,242 @@ def _render_grid_view(parsed: dict, f: pd.DataFrame):
         st.info("검색·필터 결과 0건")
         return
 
-    # Service Account 상태 안내
     sa_active = has_service_account()
     if sa_active:
-        st.caption("✓ Google Service Account 활성 — 셀 편집 후 💾 저장 시 본사 시트 자동 동기화")
+        st.caption("✓ Service Account 활성 — 💾 저장 시 본사 시트 자동 동기화")
     else:
-        st.caption("⚠ Service Account 미설정 — 그리드 편집은 가능하나 시트 push 비활성")
+        st.caption("⚠ Service Account 미설정 — 그리드 편집은 가능, 시트 push 비활성")
 
-    # Flatten
-    grid_df = flatten_for_aggrid(parsed, f)
+    # === Flatten ===
+    filter_rows = set(f["_sheet_row"].tolist()) if "_sheet_row" in f.columns else None
+    grid_df = flatten_for_aggrid(parsed, filter_rows)
     if not len(grid_df):
         st.info("표시할 데이터 없음")
         return
 
-    # 컬럼명 한글화
-    grid_df = grid_df.rename(columns={
-        "channel": "채널", "category": "카테고리", "status": "현황",
-        "customer": "고객", "phone": "연락처", "content": "내용",
-        "person_raw": "담당자", "amount": "매출",
-    })
+    # === session_state로 편집 보존 ===
+    state_key = "wl_grid_df"
+    # 새 데이터 로드 시 session_state 동기화 (filter/period 변경 감지)
+    cache_key = f"{len(grid_df)}_{grid_df['_sheet_row'].sum() if len(grid_df) else 0}"
+    if st.session_state.get("wl_grid_cache_key") != cache_key:
+        st.session_state[state_key] = grid_df.copy()
+        st.session_state["wl_grid_cache_key"] = cache_key
+    # 신규 행이 추가됐다면 보존
+    work_df = st.session_state.get(state_key, grid_df).copy()
 
     # === GridOptionsBuilder ===
-    gb = GridOptionsBuilder.from_dataframe(grid_df)
+    gb = GridOptionsBuilder.from_dataframe(work_df)
     gb.configure_default_column(
         editable=True, resizable=True, sortable=True, filter=True,
         wrapText=True, minWidth=80,
     )
-    # 내부 컬럼 숨김
     gb.configure_column("_sheet_row", hide=True, editable=False)
     gb.configure_column("_meta", hide=True, editable=False)
     gb.configure_column("row_type", hide=True, editable=False)
 
-    # === 3-level rowGroup: date → channel → category ===
+    # 3-level rowGroup
     gb.configure_column("date", rowGroup=True, hide=True, editable=False, rowGroupIndex=0)
     gb.configure_column(
-        "채널", rowGroup=True, hide=True, rowGroupIndex=1,
+        "channel", rowGroup=True, hide=True, rowGroupIndex=1,
         cellRenderer=CHANNEL_BADGE,
     )
     gb.configure_column(
-        "카테고리", rowGroup=True, hide=True, rowGroupIndex=2,
+        "category", rowGroup=True, hide=True, rowGroupIndex=2,
         cellRenderer=CATEGORY_BADGE,
     )
 
-    # === 셀 설정 ===
+    # 편집 컬럼
     gb.configure_column(
-        "현황", cellEditor="agSelectCellEditor",
-        cellEditorParams={"values": STATUS_OPTIONS + ["📝 진행사항", "⚠ 이슈사항"]},
-        cellStyle=STATUS_CELL_STYLE, width=110,
+        "status", editable=True, width=110,
+        cellEditor="agSelectCellEditor",
+        cellEditorParams={"values": STATUSES + ["📝 진행사항", "⚠ 이슈사항"]},
+        cellClassRules=STATUS_CLASS_RULES,
+        headerName="현황",
     )
-    gb.configure_column("고객", width=220)
-    gb.configure_column("연락처", width=130)
-    gb.configure_column("내용", width=380, wrapText=True, autoHeight=True)
+    gb.configure_column("customer", editable=True, width=200, headerName="고객")
+    gb.configure_column("phone", editable=True, width=130, headerName="연락처")
     gb.configure_column(
-        "담당자", cellRenderer=PERSON_BADGE, width=180,
+        "content", editable=True, flex=1, wrapText=True, autoHeight=True,
+        headerName="내용", minWidth=300,
     )
     gb.configure_column(
-        "매출", type=["numericColumn"],
-        valueFormatter=AMOUNT_FORMATTER, cellStyle=AMOUNT_STYLE, width=130,
+        "person", editable=True, width=140,
+        cellEditor="agSelectCellEditor",
+        cellEditorParams={"values": PERSONS},
+        cellRenderer=PERSON_BADGE,
+        headerName="담당자",
+    )
+    gb.configure_column(
+        "amount", editable=True, width=130, type=["numericColumn"],
+        cellStyle=AMOUNT_CELL_STYLE, valueFormatter=AMOUNT_FORMATTER,
+        headerName="매출",
     )
 
-    # === 그룹 헤더 + 진행/이슈 행 배경 ===
+    # 그룹 디스플레이 + 행 스타일
     gb.configure_grid_options(
         groupDisplayType="groupRows",
-        groupDefaultExpanded=1,
-        autoGroupColumnDef={
-            "headerName": "",
-            "cellRendererParams": {
-                "innerRenderer": DATE_HEADER_RENDERER,
-                "suppressCount": True,
-            },
-            "minWidth": 480,
+        groupRowRendererParams={
+            "innerRenderer": DATE_HEADER_RENDERER,
+            "suppressCount": True,
         },
-        getRowStyle=ROW_TYPE_STYLE,
+        groupDefaultExpanded=1,
+        getRowStyle=ROW_STYLE,
+        rowHeight=38,
         animateRows=True,
         enableRangeSelection=True,
         enableFillHandle=True,
-        rowHeight=42,
-        domLayout="normal",
     )
 
     grid_options = gb.build()
 
-    # === 액션 바 ===
-    ac1, ac2, ac3, ac4 = st.columns([1, 1, 1, 3])
-    if ac1.button("➕ 행 추가", use_container_width=True, key="wl_add"):
-        st.session_state["wl_show_new"] = True
-    if ac2.button("🔄 새로고침", use_container_width=True, key="wl_refresh"):
+    # === 액션 바 + 행 추가 4종 ===
+    st.markdown("##### 행 추가 (4종)")
+    bc1, bc2, bc3, bc4, bc5 = st.columns([1, 1, 1, 1, 2])
+    if bc1.button("➕ 내방·소비자", use_container_width=True, key="add_nb_so"):
+        _add_row_session(state_key, "내방", "소비자")
+    if bc2.button("➕ 내방·업체", use_container_width=True, key="add_nb_up"):
+        _add_row_session(state_key, "내방", "업체")
+    if bc3.button("➕ 유선·소비자", use_container_width=True, key="add_yu_so"):
+        _add_row_session(state_key, "유선", "소비자")
+    if bc4.button("➕ 유선·업체", use_container_width=True, key="add_yu_up"):
+        _add_row_session(state_key, "유선", "업체")
+    if bc5.button("🔄 시트에서 재로드 (편집 폐기)", use_container_width=True, key="wl_reload"):
         st.cache_data.clear()
+        st.session_state.pop(state_key, None)
+        st.session_state.pop("wl_grid_cache_key", None)
         st.rerun()
-    if ac3.button("💾 변경 저장", type="primary", use_container_width=True, key="wl_save"):
-        st.session_state["wl_save_trigger"] = True
-    ac4.caption(f"📂 record {(grid_df['row_type']=='record').sum()}건 + 진행 {(grid_df['row_type']=='progress').sum()} + 이슈 {(grid_df['row_type']=='issue').sum()}")
 
-    # 인라인 신규 입력
-    if st.session_state.get("wl_show_new"):
-        _render_inline_form()
+    # 저장 버튼
+    sav_c1, sav_c2 = st.columns([3, 1])
+    sav_c1.caption(f"📂 record {(work_df['row_type']=='record').sum()}건 + 진행 {(work_df['row_type']=='progress').sum()} + 이슈 {(work_df['row_type']=='issue').sum()} · 더블클릭으로 셀 편집")
+    if sav_c2.button("💾 변경 저장", type="primary", use_container_width=True, key="wl_save"):
+        st.session_state["wl_save_trigger"] = True
 
     # === AG-Grid 렌더 ===
     grid_response = AgGrid(
-        grid_df,
+        work_df,
         gridOptions=grid_options,
         update_mode=GridUpdateMode.MODEL_CHANGED,
+        data_return_mode=DataReturnMode.AS_INPUT,
         fit_columns_on_grid_load=False,
-        theme="alpine",
+        theme="streamlit",
         height=620,
         allow_unsafe_jscode=True,
         reload_data=False,
-        key=f"wl_grid_{len(grid_df)}",
+        key=f"wl_grid_{cache_key}",
     )
+
+    # 편집된 상태를 session_state에 즉시 반영
+    edited_df = pd.DataFrame(grid_response.get("data") or [])
+    if len(edited_df):
+        st.session_state[state_key] = edited_df
 
     # === 변경 감지 + push ===
     if st.session_state.get("wl_save_trigger"):
-        edited_df = pd.DataFrame(grid_response.get("data") or [])
-        # progress/issue 행은 push 대상 제외 (시트의 메타 행)
         if "row_type" in edited_df.columns:
-            edited_df = edited_df[edited_df["row_type"] == "record"]
+            edited_records = edited_df[edited_df["row_type"] == "record"]
+        else:
+            edited_records = edited_df
         orig_records = grid_df[grid_df["row_type"] == "record"].copy()
-        changes = _detect_changes(orig_records, edited_df)
-        if not changes:
+        changes = _detect_changes(orig_records, edited_records)
+        new_rows = edited_records[edited_records["_sheet_row"] == -1]  # 신규 추가된 행
+
+        if not changes and not len(new_rows):
             st.toast("변경 사항 없음", icon="ℹ")
         elif sa_active:
-            with st.spinner(f"본사 시트에 {len(changes)}개 셀 push 중..."):
-                result = push_changes(changes)
-            if result["ok"]:
-                st.toast(f"✓ 시트에 {result['updated']}개 셀 저장됨", icon="✅")
-                st.cache_data.clear()
-            else:
-                st.error(f"저장 실패: {result.get('error')}")
+            # 1. 기존 행 update
+            if changes:
+                with st.spinner(f"본사 시트에 {len(changes)}개 셀 push 중..."):
+                    result = push_changes(changes)
+                if result["ok"]:
+                    st.toast(f"✓ {result['updated']}개 셀 저장됨", icon="✅")
+                else:
+                    st.error(f"저장 실패: {result.get('error')}")
+            # 2. 신규 행 append
+            for _, r in new_rows.iterrows():
+                if not str(r.get("customer", "")).strip():
+                    continue
+                record = {
+                    "channel": r.get("channel", ""),
+                    "category": r.get("category", ""),
+                    "status": r.get("status", ""),
+                    "customer": r.get("customer", ""),
+                    "phone": r.get("phone", ""),
+                    "content": r.get("content", ""),
+                    "person": r.get("person", ""),
+                    "amount": int(r.get("amount") or 0),
+                }
+                d_str = r.get("date", date.today().isoformat())
+                d_obj = datetime.strptime(d_str, "%Y-%m-%d").date()
+                with st.spinner(f"신규 행 append..."):
+                    result = append_row(record, d_obj)
+                if result["ok"]:
+                    st.toast(f"✓ 신규 행 {result['row']} 추가", icon="✅")
+            st.cache_data.clear()
+            st.session_state.pop("wl_grid_cache_key", None)
         else:
-            st.warning(f"Service Account 미설정 — 변경 {len(changes)}건 push 보류")
-            st.dataframe(pd.DataFrame(changes), hide_index=True, use_container_width=True)
+            st.warning(f"Service Account 미설정 — 변경 {len(changes)}건 + 신규 {len(new_rows)}건 push 보류")
+            if changes:
+                st.dataframe(pd.DataFrame(changes), hide_index=True, use_container_width=True)
+            if len(new_rows):
+                st.caption("📋 신규 행 (수동 시트 추가):")
+                st.dataframe(new_rows[["date","channel","category","status","customer","content","person","amount"]],
+                              hide_index=True, use_container_width=True)
         st.session_state["wl_save_trigger"] = False
 
 
+def _add_row_session(state_key: str, channel: str, category: str):
+    """session_state DataFrame에 빈 신규 행 추가 (_sheet_row = -1)"""
+    df = st.session_state.get(state_key, pd.DataFrame())
+    new_row = {
+        "row_type": "record",
+        "date": date.today().isoformat(),
+        "_sheet_row": -1,  # 신규 표시
+        "_meta": {},
+        "channel": channel, "category": category,
+        "status": "to do",
+        "customer": "", "phone": "", "content": "",
+        "person": "", "amount": 0,
+    }
+    # 첫 행에 추가 (위쪽)
+    new_df = pd.concat([pd.DataFrame([new_row]), df], ignore_index=True)
+    st.session_state[state_key] = new_df
+    st.toast(f"➕ {channel}·{category} 행 추가 (행 채우고 💾 저장)", icon="➕")
+    st.rerun()
+
+
 def _detect_changes(orig: pd.DataFrame, edited: pd.DataFrame) -> list[dict]:
-    """orig vs edited diff → [{row, field, value}]"""
+    """orig vs edited diff → [{row, field, value}]. _sheet_row가 -1인 신규 행은 별도 처리(append)."""
     changes = []
     field_map = {
-        "채널": "channel", "카테고리": "category", "현황": "status",
-        "고객": "customer", "연락처": "phone", "내용": "content",
-        "담당자": "person", "매출": "amount",
+        "channel": "channel", "category": "category", "status": "status",
+        "customer": "customer", "phone": "phone", "content": "content",
+        "person": "person", "amount": "amount",
     }
     if "_sheet_row" not in orig.columns or "_sheet_row" not in edited.columns:
         return changes
     orig_idx = orig.set_index("_sheet_row")
     edited_idx = edited.set_index("_sheet_row")
     for sheet_row in edited_idx.index:
-        if sheet_row not in orig_idx.index or sheet_row == -1:
+        if sheet_row == -1 or sheet_row not in orig_idx.index:
             continue
-        for col_kor, col_field in field_map.items():
-            if col_kor not in edited_idx.columns or col_kor not in orig_idx.columns:
+        for col, field in field_map.items():
+            if col not in edited_idx.columns or col not in orig_idx.columns:
                 continue
-            orig_v = orig_idx.loc[sheet_row, col_kor]
-            new_v = edited_idx.loc[sheet_row, col_kor]
-            if col_field == "amount":
+            orig_v = orig_idx.loc[sheet_row, col]
+            new_v = edited_idx.loc[sheet_row, col]
+            if field == "amount":
                 try:
                     orig_n = int(orig_v) if orig_v not in ("", None) else 0
                     new_n = int(float(new_v)) if new_v not in ("", None) else 0
                     if orig_n != new_n:
-                        changes.append({"row": int(sheet_row), "field": col_field,
+                        changes.append({"row": int(sheet_row), "field": field,
                                        "value": new_n if new_n else ""})
                 except (ValueError, TypeError):
                     pass
             else:
                 if str(orig_v or "").strip() != str(new_v or "").strip():
-                    changes.append({"row": int(sheet_row), "field": col_field,
+                    changes.append({"row": int(sheet_row), "field": field,
                                    "value": str(new_v or "").strip()})
     return changes
 
@@ -454,50 +458,8 @@ def _render_fallback_table(f: pd.DataFrame):
     st.dataframe(show, hide_index=True, use_container_width=True, height=500)
 
 
-def _render_inline_form():
-    st.markdown("##### ➕ 새 영업 기록")
-    with st.form("wl_new_row", clear_on_submit=True):
-        r1 = st.columns([1.2, 1, 1, 1])
-        f_date = r1[0].date_input("일자", value=date.today())
-        f_channel = r1[1].selectbox("채널", CHANNEL_OPTIONS, index=0)
-        f_category = r1[2].selectbox("카테고리", CATEGORY_OPTIONS, index=0)
-        f_status = r1[3].selectbox("현황", STATUS_OPTIONS, index=1)
-        r2 = st.columns([2, 2])
-        f_customer = r2[0].text_input("고객명")
-        f_phone = r2[1].text_input("연락처")
-        f_content = st.text_area("내용", height=70)
-        r3 = st.columns([1.5, 1])
-        f_person = r3[0].text_input("담당자")
-        f_amount = r3[1].number_input("매출(원)", min_value=0, step=10_000)
-        bc1, bc2 = st.columns(2)
-        submitted = bc1.form_submit_button("💾 저장", type="primary", use_container_width=True)
-        cancel = bc2.form_submit_button("✕ 닫기", use_container_width=True)
-    if cancel:
-        st.session_state["wl_show_new"] = False
-        st.rerun()
-    if submitted:
-        if not f_customer.strip():
-            st.error("고객명 필수")
-            return
-        record = {
-            "channel": f_channel, "category": f_category, "status": f_status,
-            "customer": f_customer.strip(), "phone": f_phone.strip(),
-            "content": f_content.strip(), "person": f_person.strip(),
-            "amount": f_amount if f_amount > 0 else "",
-        }
-        with st.spinner("시트 저장 중..."):
-            result = append_row(record, f_date)
-        if result["ok"]:
-            st.toast(f"✓ 행 {result['row']} 추가", icon="✅")
-            st.session_state["wl_show_new"] = False
-            st.cache_data.clear()
-            st.rerun()
-        else:
-            st.warning(f"⚠ {result.get('error')}")
-
-
 # ============================================================
-# 월별 / 연별 (간소화)
+# 월별 / 연별 분석 (간소화)
 # ============================================================
 def _render_monthly_view(f: pd.DataFrame, target: dict | None):
     avail = sorted(f["ym"].unique(), reverse=True)

@@ -418,6 +418,70 @@ def format_katalk_report(data, store_name="조명 플래그십"):
     return "\n".join(lines).rstrip()
 
 
+# ===== AG-Grid 평면화 =====
+def flatten_for_aggrid(parsed: dict, filter_sheet_rows: set = None) -> pd.DataFrame:
+    """parse_worklog_v2 dict → AG-Grid용 평면 DataFrame.
+
+    row_type 컬럼 포함:
+    - 'record'   : 상담 행
+    - 'progress' : 진행사항 (시트의 진행 행 보존)
+    - 'issue'    : 이슈사항
+
+    DATE_HEADER는 AG-Grid의 rowGroup이 자동 생성하므로 더미 행 없음.
+    channel/category는 같은 일자 블록 내 forward-fill (셀 병합 효과).
+    """
+    rows = []
+    for d in parsed.get("dates", []):
+        date_records = d.get("records", [])
+        if filter_sheet_rows is not None:
+            date_records = [r for r in date_records if r["_sheet_row"] in filter_sheet_rows]
+        if not date_records:
+            continue
+        meta = d.get("meta", {})
+        for r in date_records:
+            rows.append({
+                "row_type": "record",
+                "date": d["date"],
+                "_sheet_row": r["_sheet_row"],
+                "_meta": meta,
+                "channel": r.get("channel") or "",
+                "category": r.get("category") or "",
+                "status": r.get("status") or "",
+                "customer": r.get("customer") or "",
+                "phone": r.get("phone") or "",
+                "content": r.get("content") or "",
+                "person": r.get("person_raw") or "",
+                "amount": int(r.get("amount") or 0),
+            })
+        for p in d.get("progress", []):
+            rows.append({
+                "row_type": "progress", "date": d["date"], "_meta": meta,
+                "_sheet_row": -1,
+                "channel": "", "category": "",
+                "status": "📝 진행사항",
+                "customer": "", "phone": "", "content": p,
+                "person": "", "amount": 0,
+            })
+        for i in d.get("issues", []):
+            rows.append({
+                "row_type": "issue", "date": d["date"], "_meta": meta,
+                "_sheet_row": -1,
+                "channel": "", "category": "",
+                "status": "⚠ 이슈사항",
+                "customer": "", "phone": "", "content": i,
+                "person": "", "amount": 0,
+            })
+    df = pd.DataFrame(rows)
+    if len(df):
+        rec_mask = df["row_type"] == "record"
+        for col in ["channel", "category"]:
+            df.loc[rec_mask, col] = (
+                df[rec_mask].groupby("date")[col]
+                .transform(lambda s: s.replace("", pd.NA).ffill().fillna(""))
+            )
+    return df
+
+
 # ===== 월 목표 매출 / 누적 매출 / 달성률 (시트 1-2행) =====
 def parse_monthly_target(csv_text):
     """플래그십 업무일지 1-2행에서 월 목표 매출 + 당일 누적 + 달성률 추출.
