@@ -71,13 +71,26 @@ def _normalize_db_id(raw: str) -> str:
 
 @st.cache_resource
 def get_notion_client():
-    """notion-client 인스턴스 lazy init. 토큰 없으면 None."""
+    """notion-client 인스턴스 lazy init. 토큰 없거나 비-ASCII면 None."""
     token = _get_secret("NOTION_TOKEN")
-    if not token or token.startswith("ntn_xxxx"):
+    if not token or str(token).startswith("ntn_xxxx"):
+        return None
+    # ASCII 가드: Notion API는 토큰을 HTTP Authorization 헤더로 전송하므로
+    # 한글·공백·특수문자가 섞이면 'ascii' codec encode 오류 발생.
+    # 토큰 형식은 'ntn_' + ASCII 영숫자.
+    token_str = str(token).strip()
+    try:
+        token_str.encode("ascii")
+    except UnicodeEncodeError:
+        st.warning(
+            "⚠ NOTION_TOKEN 값에 한글/특수문자가 포함되어 있습니다. "
+            "Streamlit Cloud → Settings → Secrets 에서 토큰을 재확인하세요. "
+            "올바른 형식: `ntn_` 로 시작하는 50자 영숫자."
+        )
         return None
     try:
         from notion_client import Client
-        return Client(auth=token)
+        return Client(auth=token_str)
     except Exception as e:
         st.warning(f"Notion 클라이언트 초기화 실패: {e}")
         return None
