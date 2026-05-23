@@ -11,9 +11,11 @@ import calendar as cal
 from datetime import date, datetime, timedelta
 
 from parsers import (
-    load_worklog_df, load_monthly_target,
+    load_worklog_df, load_monthly_target, SHEET_ID, WORKLOG_TAB,
     aggregate_by_brand, aggregate_by_customer,
     daily_report_data, format_katalk_report,
+    append_worklog_row, format_row_tsv, format_date_header_tsv,
+    CHANNEL_OPTIONS, CATEGORY_OPTIONS, STATUS_OPTIONS,
 )
 from utils.styles import (
     greeting_header, black_kpi_card, multi_card_row, leaderboard_row,
@@ -35,13 +37,16 @@ def render():
     df = df[df["fmt"] == "NEW"].copy()
     target = load_monthly_target()
 
-    tab_today, tab_calendar, tab_customers, tab_brands = st.tabs([
+    tab_write, tab_today, tab_calendar, tab_customers, tab_brands = st.tabs([
+        "✍ 영업 기록 작성",
         "📝 오늘 보고",
         "📅 캘린더 리포트",
         "👥 고객 (LTV)",
         "🏷 브랜드 분석",
     ])
 
+    with tab_write:
+        _render_write_tab()
     with tab_today:
         _render_today_tab(df, target)
     with tab_calendar:
@@ -50,6 +55,118 @@ def render():
         _render_customers_tab(df)
     with tab_brands:
         _render_brands_tab(df)
+
+
+# ====================================================================
+# Tab 0. ✍ 영업 기록 작성 (본사 시트 Write)
+# ====================================================================
+def _render_write_tab():
+    st.markdown(section_header(
+        "본사 시트와 동일한 형식으로 작성 → 즉시 기록",
+        "Service account 등록 시 자동 write / 미등록 시 TSV 복사로 수동 붙여넣기"
+    ), unsafe_allow_html=True)
+
+    # Service account 상태 표시
+    from parsers.worklog_writer import _has_service_account
+    if _has_service_account():
+        st.markdown(alert_banner(
+            "✓ Google Service Account 활성",
+            "폼 제출 시 본사 시트의 해당 날짜 블록에 자동 append됩니다. (gspread)",
+            level="green", icon="✓"
+        ), unsafe_allow_html=True)
+    else:
+        st.markdown(alert_banner(
+            "ⓘ Service Account 미설정 — 수동 모드",
+            "폼 제출 시 TSV 텍스트가 생성됩니다. 복사 → 본사 시트에 붙여넣기. "
+            "자동 write 활성화: secrets.toml.example의 [gcp_service_account] 블록 참조.",
+            level="blue", icon="ⓘ"
+        ), unsafe_allow_html=True)
+
+    with st.form("worklog_form", clear_on_submit=False):
+        st.markdown("##### 📅 날짜 & 분류")
+        c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
+        rec_date = c1.date_input("날짜", value=date.today())
+        channel = c2.selectbox("채널", CHANNEL_OPTIONS, index=0)
+        category = c3.selectbox("카테고리", CATEGORY_OPTIONS, index=0)
+        status_v = c4.selectbox("상태", STATUS_OPTIONS, index=1)
+
+        st.markdown("##### 👤 고객 정보")
+        c5, c6 = st.columns([2, 2])
+        customer = c5.text_input("고객명", placeholder="예) 김아름 사원 손님 / 단체 가족 / 30대 부부")
+        phone = c6.text_input("전화 (선택)", placeholder="010-XXXX-XXXX")
+
+        st.markdown("##### 📋 상담 내용")
+        content = st.text_area(
+            "내용",
+            placeholder="예) Luce / Grammoluce / Ginger / Tekio 제품 견적 안내 > 다음주 재방문 예정",
+            height=100,
+        )
+
+        st.markdown("##### 💰 담당자 & 금액")
+        c7, c8 = st.columns([1.5, 1])
+        person = c7.text_input("담당자", placeholder="예) 서영완 선임 / 추승민 사원")
+        amount = c8.number_input("금액 (원, 결제 시만)", min_value=0, step=10_000, value=0)
+
+        submitted = st.form_submit_button("📤 본사 시트에 기록", type="primary", use_container_width=True)
+
+    if submitted:
+        if not customer.strip():
+            st.error("고객명은 필수입니다.")
+            return
+        record = {
+            "channel": channel,
+            "category": category,
+            "status": status_v,
+            "customer": customer.strip(),
+            "phone": phone.strip(),
+            "content": content.strip(),
+            "person": person.strip(),
+            "amount": amount if amount > 0 else "",
+        }
+        with st.spinner("본사 시트에 기록 중..."):
+            result = append_worklog_row(record, rec_date, SHEET_ID, WORKLOG_TAB)
+
+        if result["ok"]:
+            st.success(f"✓ 본사 시트에 기록 완료 (행 {result['row']}, {rec_date.isoformat()})")
+            if result.get("header_tsv"):
+                st.caption(f"※ 새 날짜 블록이 시트 맨 아래에 추가됨 — 시트에서 적절한 위치로 이동 권장")
+            # 5분 캐시 clear → 즉시 분석 갱신
+            st.cache_data.clear()
+            st.balloons()
+        else:
+            st.warning(f"⚠ 자동 write 미실행: {result.get('error', '')}")
+            st.markdown(section_header("TSV 복사 — 본사 시트에 붙여넣기"), unsafe_allow_html=True)
+            if result.get("header_tsv"):
+                st.caption("📌 같은 날짜 블록이 시트에 없습니다 — 아래 헤더부터 붙여넣기:")
+                st.code(result["header_tsv"], language="text")
+                st.caption("그 다음 카테고리 행:")
+                st.code("\t".join(["카테고리"] + [""]*9), language="text")
+            st.caption("📌 데이터 행:")
+            st.code(result["tsv"], language="text")
+            st.caption("💡 시트에 빈 행 우클릭 → 셀에 붙여넣기 (탭으로 자동 분리)")
+
+    # 빠른 도움말
+    with st.expander("ⓘ Service Account 자동 write 활성화 방법"):
+        st.markdown("""
+1. Google Cloud Console → 새 프로젝트 또는 기존 프로젝트
+2. **APIs & Services → Library** → "Google Sheets API" 활성화
+3. **APIs & Services → Credentials → Create Credentials → Service Account**
+4. JSON 키 다운로드
+5. **본사 시트** 우상단 공유 → service account 이메일에 **편집자 권한** 부여
+6. Streamlit Cloud → **Settings → Secrets** 에 아래 블록 추가:
+
+```toml
+[gcp_service_account]
+type = "service_account"
+project_id = "your-project"
+private_key_id = "..."
+private_key = "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n"
+client_email = "duomo-flagship-sa@your-project.iam.gserviceaccount.com"
+...
+```
+
+저장 후 앱 자동 재시작 → 본 탭에 ✓ Active 표시됨.
+""")
 
 
 # ====================================================================
