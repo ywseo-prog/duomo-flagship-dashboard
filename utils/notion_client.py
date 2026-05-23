@@ -11,9 +11,11 @@ from datetime import datetime, timedelta
 
 
 DEFAULT_DB_IDS = {
-    "orders":   "b4a420d2-9bdc-4971-b1c9-a19306ad8cbe",
+    # 발주: Notion 연동 제외 — 발주시스템 v3 (외부) 사용. 더미 fallback만 동작.
+    "orders":   "",
     "tasks":    "d0f673d9-dc62-4f20-9a6b-1090d96a5313",
-    "meeting":  "0699ce3b-e55f-4995-8242-a5098c50fcc6",
+    # 회의록: 기존 통합본 → 플래그십 전용 신규 DB 사용 권장 (secrets로 override)
+    "meeting":  "",
     "calendar": "",
 }
 
@@ -55,6 +57,16 @@ def _get_secret(key: str, default=None):
         return default
 
 
+def _normalize_db_id(raw: str) -> str:
+    """Notion DB ID 정규화 — 32자 no-hyphen이면 8-4-4-4-12 hyphen 형식으로 변환.
+    API는 양쪽 다 받지만 일관성·디버깅 편의를 위해 통일.
+    """
+    s = (raw or "").strip().replace("-", "")
+    if len(s) == 32 and all(c in "0123456789abcdefABCDEF" for c in s):
+        return f"{s[0:8]}-{s[8:12]}-{s[12:16]}-{s[16:20]}-{s[20:32]}"
+    return raw or ""
+
+
 @st.cache_resource
 def get_notion_client():
     """notion-client 인스턴스 lazy init. 토큰 없으면 None."""
@@ -76,7 +88,7 @@ def get_db_id(key: str) -> str:
         "meeting": "MEETING_DB_ID", "calendar": "CALENDAR_DB_ID",
     }.get(key)
     val = _get_secret(secret_key) if secret_key else None
-    return val or DEFAULT_DB_IDS.get(key, "")
+    return _normalize_db_id(val or DEFAULT_DB_IDS.get(key, ""))
 
 
 def _extract_text(prop):

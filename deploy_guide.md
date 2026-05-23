@@ -67,7 +67,7 @@ utils/styles.py
 
 ---
 
-## Step 4 — Secrets 설정
+## Step 4 — Secrets 설정 (v0.4.1)
 
 **Advanced settings** → **Secrets** 영역에 다음을 붙여넣기:
 
@@ -75,11 +75,16 @@ utils/styles.py
 # === Notion API ===
 NOTION_TOKEN = "ntn_여기에토큰입력"
 
-# === Notion DB IDs (발견된 기본값) ===
-ORDERS_DB_ID = "b4a420d2-9bdc-4971-b1c9-a19306ad8cbe"
+# === 캘린더 (사용자 제공 - 이미 생성됨) ===
+CALENDAR_DB_ID = "2bf27f0f-c317-8054-a65d-ead0fef4cbe0"
+
+# === 주작업 (기존) ===
 TASKS_DB_ID = "d0f673d9-dc62-4f20-9a6b-1090d96a5313"
-MEETING_DB_ID = "0699ce3b-e55f-4995-8242-a5098c50fcc6"
-CALENDAR_DB_ID = "여기에-캘린더-DB-ID-입력"
+
+# === 회의록 (플래그십 전용 신규 생성 - notion_setup_guide.md Step 5) ===
+MEETING_DB_ID = "여기에-새로만든-회의록-DB-ID"
+
+# === 발주: Notion 미연동 (발주시스템 v3 외부 운영) ===
 
 # === Google Sheets (선택) ===
 # 업무일지 시트가 공개 상태라면 생략 가능.
@@ -87,6 +92,7 @@ CALENDAR_DB_ID = "여기에-캘린더-DB-ID-입력"
 ```
 
 > 토큰 발급은 [notion_setup_guide.md](notion_setup_guide.md) Step 1 참조.
+> 회의록 DB 신규 생성: [notion_setup_guide.md Step 5](notion_setup_guide.md) 참조.
 
 ---
 
@@ -146,6 +152,7 @@ App settings → Secrets → 수정 → Save → 자동 reboot.
 | Date | Version | Note |
 |---|---|---|
 | 2026-05-23 | v0.4 | 초기 배포 — 7개 모듈, Notion 양방향, 디자인 시안 5종 반영 |
+| 2026-05-23 | v0.4.1 | 발주 Notion 연동 제외 / 캘린더 실 DB ID 등록 / 회의록 플래그십 전용 분리 |
 
 ---
 

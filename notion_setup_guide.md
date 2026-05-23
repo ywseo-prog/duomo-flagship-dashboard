@@ -1,6 +1,11 @@
-# Notion 셋업 가이드 (Duomo Flagship Dashboard v0.4)
+# Notion 셋업 가이드 (Duomo Flagship Dashboard v0.4.1)
 
-본 가이드는 대시보드의 7개 모듈을 Notion DB와 양방향으로 연결하기 위한 단계별 설정입니다.
+본 가이드는 대시보드를 Notion DB와 양방향 연결하기 위한 단계별 설정입니다.
+
+> **변경 (v0.4.1):**
+> - ❌ **발주마스터 Notion 연동 제외** — 발주시스템 v3 (외부) 별도 운영
+> - ✅ **캘린더 DB**: 사용자 워크스페이스에 이미 생성됨 → ID 등록만
+> - 🆕 **회의록 DB**: 플래그십 전용으로 **신규 생성** 필요 (기존 통합 회의록 X)
 
 ---
 
@@ -11,54 +16,48 @@
 3. 이름: `Duomo Flagship Dashboard`
 4. **Type**: Internal
 5. **Capabilities**: ✓ Read content / ✓ Update content / ✓ Insert content
-6. **Submit** 후 표시되는 **Internal Integration Secret** (`ntn_xxxxxxxxxxxx…`)을 복사 — 이것이 `NOTION_TOKEN`.
+6. **Submit** → 표시되는 **Internal Integration Secret** (`ntn_xxxxxxxxxxxx…`) 복사 = `NOTION_TOKEN`
 
 > ⚠ Secret은 1회만 표시되며 분실 시 재발급 필요.
 
 ---
 
-## 2. 발견된 Duomo Notion DB (이미 매핑됨)
+## 2. 연결할 DB 3개 (발주 제외)
 
-대시보드는 아래 3개 DB ID를 기본값으로 사용합니다. 별도 입력 불필요 (단, **3에서 Integration Connection만 추가**해야 합니다).
-
-| 용도 | DB 이름 | DB ID |
+| 용도 | 상태 | DB ID |
 |---|---|---|
-| 발주마스터 | 발주 권고 마스터 | `b4a420d2-9bdc-4971-b1c9-a19306ad8cbe` |
-| 주작업 (태스크) | 주작업 | `d0f673d9-dc62-4f20-9a6b-1090d96a5313` |
-| 회의록 | 회의록 | `0699ce3b-e55f-4995-8242-a5098c50fcc6` |
+| 📅 캘린더 | ✅ 생성 완료 (사용자 제공) | `2bf27f0f-c317-8054-a65d-ead0fef4cbe0` |
+| 📋 주작업 (태스크) | ✅ 기존 사용 | `d0f673d9-dc62-4f20-9a6b-1090d96a5313` |
+| 📝 회의록 (플래그십 전용) | 🆕 **신규 생성 필요** | — (생성 후 ID 입력) |
+
+> 발주 모듈은 더미 데이터로 동작합니다. 추후 발주시스템 v3 연동은 별도 작업.
 
 ---
 
-## 3. 각 DB에 Integration 연결
+## 3. 각 DB에 Integration 연결 (3개)
 
-위 3개 DB 페이지를 각각 열고:
+위 표의 **캘린더**, **주작업**, **(신규 생성한) 회의록** DB 각각:
 
-1. 우상단 **⋯ (More)** → **Connections** → **+ Add connections**
-2. 방금 만든 `Duomo Flagship Dashboard` 선택 → **Confirm**
+1. DB 페이지 우상단 **⋯ (More)** → **Connections** → **+ Add connections**
+2. `Duomo Flagship Dashboard` 선택 → **Confirm**
 
-3개 DB 모두 동일하게 수행. 미연결 시 대시보드는 더미 데이터로 fallback.
+미연결 시 더미 데이터로 fallback.
 
 ---
 
-## 4. 캘린더 DB 생성 (권장)
+## 4. 캘린더 DB 컬럼 확인
 
-기존 "주작업"의 날짜 컬럼으로도 fallback 동작하지만, **별도 캘린더 DB** 생성을 권장합니다.
-
-### 4-1. 새 DB 생성
-
-1. 임의 Notion 페이지에서 `/database` → **Database - Full page**
-2. 이름: `Duomo 팀 캘린더`
-3. 아래 컬럼 추가:
+이미 생성된 캘린더 DB(`2bf27f0fc3178054a65dead0fef4cbe0`)가 아래 컬럼을 갖춰야 합니다. 누락 시 직접 추가:
 
 | 컬럼 이름 | Type | 옵션 |
 |---|---|---|
-| 이름 | Title | (기본) |
-| 날짜 | Date | 시간 포함 |
-| 분류 | Select | 발주마감, 매장이벤트, 시몬스미팅, VIP컨설팅, 인플루언서협찬, 교육, 휴가, 회의, 출장, 기타 |
-| 담당자 | Text (또는 People) | |
-| 메모 | Text | |
+| **이름** | Title | (기본) |
+| **날짜** | Date | 시간 포함 권장 |
+| **분류** | Select | 발주마감, 매장이벤트, 시몬스미팅, VIP컨설팅, 인플루언서협찬, 교육, 휴가, 회의, 출장, 기타 |
+| **담당자** | Text 또는 People | |
+| **메모** | Text | |
 
-### 4-2. 분류 옵션 컬러 매핑 (Notion에서 직접 지정)
+### 분류 옵션 컬러 매핑 (Notion에서 직접 지정 권장)
 
 | 분류 | Notion Color | 대시보드 HEX |
 |---|---|---|
@@ -73,18 +72,46 @@
 | 출장 | Brown | `#5D4037` |
 | 기타 | Default | `#607D8B` |
 
-### 4-3. DB ID 복사
+---
 
-생성한 DB 페이지 URL: `https://www.notion.so/{workspace}/{DB_ID}?v=...`
-중간 32자 hyphen 포함 hash가 `CALENDAR_DB_ID`. (예: `12345678-1234-1234-1234-123456789012`)
+## 5. 회의록 DB 신규 생성 (플래그십 전용)
 
-### 4-4. Integration 연결
+기존 통합 회의록과 분리, 플래그십 운영 회의만 별도 관리.
 
-위 3과 동일하게 `Duomo Flagship Dashboard` integration 연결.
+### 5-1. DB 생성
+
+1. 임의 Notion 페이지 → `/database` → **Database - Full page**
+2. 이름: `플래그십 회의록`
+3. 아이콘: 📝 / 커버는 선택
+
+### 5-2. 컬럼 스키마
+
+| 컬럼 이름 | Type | 옵션 / 비고 |
+|---|---|---|
+| **이름** | Title | 회의 제목 (예: "5월 4주차 정기 회의") |
+| **일시** | Date | 시간 포함 |
+| **분류** | Select | 정기 / 긴급 / 시몬스 / VIP / 교육 / 외부미팅 / 기타 |
+| **참석자** | Multi-select 또는 Text | 서영완, 이혜지, 신정훈, 박OO 등 |
+| **주관자** | Text 또는 People | |
+| **장소** | Text | 4F 사무실, ZOOM, 시몬스 사옥 등 |
+| **결정사항** | Text | 핵심 결정 BLUF |
+| **액션아이템** | Text 또는 Relation → 주작업 | 후속 태스크 연결 |
+| **태그** | Multi-select | 매출 / 발주 / 제안서 / 대여 / AS / 캘린더 / 인사 |
+| **링크** | URL | Drive 진행일지 / 자료 링크 |
+
+### 5-3. DB ID 복사
+
+생성한 DB URL: `https://www.notion.so/{workspace}/{32자hash}?v=...`
+- 32자 hash가 DB ID
+- 대시보드 코드가 자동으로 hyphen 형식으로 변환하므로 양식 무관
+
+### 5-4. Integration 연결
+
+위 **3단계**와 동일 → `Duomo Flagship Dashboard` integration 추가.
 
 ---
 
-## 5. 주작업 DB 권장 컬럼
+## 6. 주작업 DB 권장 컬럼
 
 대시보드의 태스크 위젯은 아래 컬럼명을 가정합니다 (없으면 자동 생성/생략):
 
@@ -100,51 +127,56 @@
 
 ---
 
-## 6. Streamlit Secrets 등록
+## 7. Streamlit Secrets 등록
 
 ### 로컬 (개발)
 
-`dashboard/.streamlit/secrets.toml` 생성:
+`.streamlit/secrets.toml` 생성:
 
 ```toml
 NOTION_TOKEN = "ntn_여기에토큰입력"
 
-# 기본값 그대로 사용 가능
-ORDERS_DB_ID = "b4a420d2-9bdc-4971-b1c9-a19306ad8cbe"
-TASKS_DB_ID = "d0f673d9-dc62-4f20-9a6b-1090d96a5313"
-MEETING_DB_ID = "0699ce3b-e55f-4995-8242-a5098c50fcc6"
+# 캘린더 (사용자 제공 - 이미 생성됨)
+CALENDAR_DB_ID = "2bf27f0f-c317-8054-a65d-ead0fef4cbe0"
 
-# 4에서 생성한 캘린더 DB ID
-CALENDAR_DB_ID = "여기에-생성한-캘린더-DB-ID"
+# 주작업 (기존)
+TASKS_DB_ID = "d0f673d9-dc62-4f20-9a6b-1090d96a5313"
+
+# 회의록 (5단계에서 생성한 신규 DB ID)
+MEETING_DB_ID = "여기에-새로만든-회의록-DB-ID"
+
+# 발주: Notion 미연동 (v3 외부 시스템)
 ```
 
 ### Streamlit Cloud (배포)
 
-App Settings → **Secrets** → 위 내용 그대로 붙여넣기 → Save.
+App settings → **Secrets** → 위 내용 그대로 붙여넣기 → **Save**.
+저장 후 앱 자동 재기동 (~30초).
 
 ---
 
-## 7. 동작 확인
+## 8. 동작 확인
 
 | 동작 | 기대 결과 |
 |---|---|
 | 사이드바 캡션 | `🟢 Notion 연동 활성` |
-| 캘린더 모듈 | 이벤트 카드 표시됨 |
-| 발주 상황 | 결품/긴급 SKU 알람 노출 |
-| 신규 이벤트 추가 | Notion DB에 즉시 row 생성 |
-| 5분 캐시 | 자동 갱신, 강제는 `Cmd+R` |
+| 캘린더 모듈 월간 그리드 | 사용자 생성 DB 이벤트 렌더링 |
+| 신규 이벤트 추가 폼 | Notion DB에 즉시 row 생성 |
+| 발주 모듈 | 더미 데이터 (정상 — 발주 Notion 연동 안 함) |
+| 5분 캐시 | TTL 자동 갱신, 즉시 반영 필요 시 `Cmd/Ctrl+R` |
 
 ---
 
-## 8. 문제 해결
+## 9. 문제 해결
 
 | 증상 | 원인 / 해결 |
 |---|---|
-| `🟢` 안 뜨고 더미만 나옴 | Secrets > NOTION_TOKEN 미입력 또는 형식 오류 |
+| `🟢` 안 뜨고 더미만 나옴 | `NOTION_TOKEN` 미입력 또는 형식 오류 |
 | DB는 보이는데 빈 결과 | DB에 Integration Connection 미추가 (3단계) |
-| 이벤트 생성 실패 | DB 컬럼명이 가이드와 다름 — 컬럼명 정확히 일치 필요 |
-| 5분간 변경사항 미반영 | TTL 캐시. 강제 새로고침 또는 5분 대기 |
+| 이벤트 생성 실패 | DB 컬럼명 불일치 — 4단계의 정확한 컬럼명 사용 |
+| 회의록 위젯 비활성 | `MEETING_DB_ID` 미입력 — 5단계 완료 후 입력 |
+| 5분간 변경사항 미반영 | TTL 캐시. `Cmd/Ctrl+R` 강제 새로고침 |
 
 ---
 
-© Duomo&Co 2026 — Notion Integration Guide v0.4
+© Duomo&Co 2026 — Notion Integration Guide v0.4.1

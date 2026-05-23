@@ -1,4 +1,6 @@
-"""모듈 5: 발주 상황 (Notion 발주마스터 실연동 + MoC/ROP + AIR/SEA 듀얼카드)"""
+"""모듈 5: 발주 상황 — 발주시스템 v3 (외부) + MoC/ROP + AIR/SEA 듀얼카드
+※ Notion 발주마스터 DB 연동은 사용자 결정으로 제외 (v3 별도 운영).
+   현재는 더미 데이터 / 향후 v3 API 또는 CSV 임포트 연동 예정."""
 import streamlit as st
 import pandas as pd
 import plotly.express as px
