@@ -267,6 +267,51 @@ div[data-testid="stMetricLabel"] { font-size: 11px !important; letter-spacing: 0
   box-shadow: var(--shadow);
 }
 
+/* 업무일지 v2 — 헤더·무결성·칩·미니KPI·인라인폼 */
+.wl-integrity {
+  padding: 8px 14px; border-radius: 8px; margin: 6px 0 12px 0;
+  font-size: 12px; display: flex; gap: 10px; align-items: center;
+  border-left: 3px solid #2E7D32;
+  background: #ECF5ED; color: #1B5E20;
+}
+.wl-integrity.warn { background: #FFF8E1; color: #B26500; border-left-color: #F57C00; }
+.wl-integrity.error { background: #FDECEC; color: #B71C1C; border-left-color: #D32F2F; }
+.wl-integrity .wi-icon { font-size: 16px; }
+.wl-integrity .wi-gap { font-family: 'Inter',sans-serif; font-weight: 700; margin-left: 4px; }
+
+.wl-kpi-mini {
+  background: #0A0A0A; color: #fff; padding: 12px 14px;
+  border-radius: 10px; box-shadow: var(--shadow);
+  min-height: 84px; display: flex; flex-direction: column; justify-content: space-between;
+  position: relative; overflow: hidden;
+}
+.wl-kpi-mini .km-icon { position: absolute; top: 8px; right: 10px; font-size: 14px; opacity: 0.45; }
+.wl-kpi-mini .km-label { font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase; color: #BBB; }
+.wl-kpi-mini .km-value { font-family: 'Inter',sans-serif; font-size: 19px; font-weight: 800; letter-spacing: -0.3px; margin: 4px 0 2px 0; color: #fff; }
+.wl-kpi-mini .km-sub { font-size: 10px; color: #BBB; }
+.wl-kpi-mini .km-sub.up { color: #FF6B35; font-weight: 700; }
+.wl-kpi-mini .km-sub.down { color: #FF6B35; font-weight: 700; }
+.wl-kpi-mini .km-sub.gold { color: #C9A961; font-weight: 700; }
+
+.wl-inline-form {
+  background: #FFFEF7; border: 2px dashed #C9A961;
+  padding: 16px 18px; border-radius: 12px; margin: 8px 0 14px 0;
+}
+.wl-inline-form .if-title {
+  font-weight: 700; color: #0A0A0A; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+
+.wl-day-footer {
+  padding: 8px 14px; background: #F5F5F5; border-radius: 8px;
+  margin-top: 10px; font-size: 11.5px; color: #555;
+  display: flex; justify-content: space-around; align-items: center;
+}
+.wl-day-footer b { color: #0A0A0A; margin-left: 4px; font-family: 'Inter',sans-serif; }
+
+/* 페이지 헤더 액션 (greeting 옆 버튼) */
+.wl-page-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
 /* 업무일지 일별 카드 — 스프레드시트 1:1 재현 */
 .wl-day-meta {
   display: flex; align-items: center; justify-content: space-between;

@@ -1,18 +1,13 @@
-"""모듈 2: 업무일지 — 스프레드시트 양식 1:1 재현 + 3단 뷰 + 신규 입력 폼
+"""모듈 2: 업무일지 v2 — 첫 화면 정보 밀도 ↑, 스프레드시트 1:1 + 좌우 split
 
-[원본] Google Sheets '플래그십 업무일지' 탭 (ID 1enUaMwY...)
-일별 반복 블록: 날짜 행 → 카테고리 헤더 → 데이터(채널/카테고리 그룹) → 진행/이슈
+UI 우선순위:
+  1. 첫 화면 재배치 (좌 7/12 카드 / 우 5/12 컴팩트 KPI)
+  2. 일별 카드 스프레드시트 양식 재현 + 일일 합계 푸터
+  3. 빠른 탐색 칩 ([오늘][어제][최근7일][최근30일][📅 날짜])
+  4. 데이터 무결성 알림 (시트 헤더 vs 산정값 갭)
+  5. 신규 입력 인라인 폼 (헤더 [+신규입력] 토글)
 
-[대시보드]
-1. 상단 KPI 4 (목표/누계/달성률/일평균)
-2. 검색·필터 (텍스트/기간/다중/매출)
-3. 3단 뷰 토글: 일별(카드) / 월별 / 연별
-4. 신규 입력 폼 (expander 하단)
-
-컬러 매핑:
-- 상태: done=#999, ing=#FFB300, 결제완료=#C9A961, 견적진행=#1976D2
-- 담당자 6인: 서영완(골드) / 조이경(블루) / 윤소담(보라) / 추승민(그린)
-  / 신민정(오렌지) / 박OO(블루그레이)
+데이터: Google Sheets '플래그십 업무일지' (NEW+OLD 통합 parser)
 """
 from __future__ import annotations
 import streamlit as st
@@ -22,12 +17,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import date, datetime, timedelta
 from calendar import monthrange
+import re
 
 from parsers import (
     load_worklog_df, aggregate_monthly, aggregate_by_person, aggregate_by_brand,
     aggregate_by_customer, load_monthly_target, load_visitor_trend,
     SHEET_ID, WORKLOG_TAB,
-    append_worklog_row, append_worklog_block,
+    append_worklog_row,
     CHANNEL_OPTIONS, CATEGORY_OPTIONS, STATUS_OPTIONS,
 )
 from utils import (
@@ -38,11 +34,11 @@ from utils import (
 
 
 # ============================================================
-# 컬러 매핑 (디자인 시스템 v0.4)
+# 컬러 매핑 (스펙 v2)
 # ============================================================
 STATUS_COLOR = {
     "done":      "#999999",
-    "ing":       "#FFB300",
+    "ing":       "#FFA000",
     "결제 완료": "#C9A961",
     "결제완료":  "#C9A961",
     "견적 진행": "#1976D2",
@@ -54,13 +50,14 @@ STATUS_COLOR = {
     "재방문":    "#5D4037",
 }
 
+# 6인 고정 컬러 (스펙 v2)
 PERSON_COLOR = {
-    "서영완": "#C9A961",  # 골드 (파트장)
     "조이경": "#1976D2",  # 블루
-    "윤소담": "#7B1FA2",  # 보라
-    "추승민": "#2E7D32",  # 그린
-    "신민정": "#FF6B35",  # 오렌지
-    "박미진": "#455A64",  # 블루그레이
+    "서영완": "#2E7D32",  # 그린
+    "추승민": "#7B1FA2",  # 보라
+    "강혁진": "#C2185B",  # 핑크
+    "이현진": "#00838F",  # 청록
+    "신민정": "#F57C00",  # 오렌지
 }
 
 CHANNEL_LABEL = {"내방": "📍 내방", "유선": "📞 유선", "온라인": "💻 온라인", "소개": "🤝 소개"}
@@ -70,7 +67,6 @@ VIP_THRESHOLD = 3_000_000
 
 
 def _person_color(name: str) -> str:
-    """담당자 컬러 fallback — 정규화된 풀네임에서 첫 매치"""
     if not name:
         return "#999999"
     s = str(name)
@@ -81,12 +77,10 @@ def _person_color(name: str) -> str:
 
 
 def _person_badge(person_raw: str) -> str:
-    """담당자 raw 문자열 → 6인별 배지 HTML (콤마/슬래시 구분 시 다중)"""
     if not person_raw:
         return ""
     parts = []
-    import re as _re
-    for tok in _re.split(r"[,，、/]\s*", str(person_raw)):
+    for tok in re.split(r"[,，、/]\s*", str(person_raw)):
         tok = tok.strip()
         if not tok:
             continue
@@ -99,12 +93,6 @@ def _person_badge(person_raw: str) -> str:
 # 메인 entry
 # ============================================================
 def render():
-    greeting_header(
-        "서영완",
-        role="조명플래그십파트 · 본사 업무일지 1:1 재현 + 통합 분석",
-        page_title="📊 업무일지",
-    )
-
     df_all = load_worklog_df(source="auto")
     if not len(df_all):
         st.error("본사 시트 데이터 로드 실패 — Google Sheets 권한 또는 네트워크 확인")
@@ -112,150 +100,186 @@ def render():
     df_all = df_all.copy()
     target = load_monthly_target()
 
-    # === 상단 고정 KPI 4 ===
-    _render_top_kpi(df_all, target)
+    # === 1. 페이지 헤더: greeting + 액션 버튼 ===
+    h1, h2 = st.columns([5, 2])
+    with h1:
+        greeting_header(
+            "서영완",
+            role="조명플래그십파트 · 본사 업무일지 1:1",
+            page_title="📊 업무일지",
+        )
+    with h2:
+        st.markdown("<div style='height:34px'></div>", unsafe_allow_html=True)
+        bc1, bc2 = st.columns(2)
+        if bc1.button("➕ 신규 입력", use_container_width=True, key="wl_btn_new"):
+            st.session_state["wl_show_form"] = not st.session_state.get("wl_show_form", False)
+        bc2.button("↓ 리포트", use_container_width=True, key="wl_btn_report",
+                   help="페이지 하단 본사 시트 추이로 스크롤")
 
-    # === 뷰 토글 + 검색·필터 ===
-    vc1, vc2 = st.columns([2, 5])
-    view = vc1.radio(
-        "뷰",
-        ["📅 일별 (스프레드시트)", "🗓 월별", "📆 연별"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="wl_view",
-    )
-    fmt_count = df_all["fmt"].value_counts().to_dict()
-    fmt_caption = " · ".join(f"{k} {v:,}건" for k, v in fmt_count.items())
-    vc2.caption(f"📂 총 {len(df_all):,}건 ({fmt_caption}) · 자동 분류: 브랜드 12종 + 담당자 정규화")
+    # === 2. 데이터 무결성 알림 ===
+    _render_integrity_banner(df_all, target)
 
-    f = _render_filters(df_all)
+    # === 3. 빠른 탐색 칩 ===
+    chip_key = _render_quick_chips()
+
+    # === 4. 검색 + 필터 (한 줄) ===
+    f = _render_search_filters(df_all)
+
+    # === 5. 칩으로 추가 필터 적용 ===
+    f = _apply_chip_filter(f, chip_key)
+
     if not len(f):
-        st.warning("필터 결과 0건 — 조건을 완화해 주세요.")
+        st.warning("필터/탐색 결과 0건 — 다른 칩이나 필터를 시도해 주세요.")
         return
 
+    # === 6. 본문: 좌 7/12 카드 + 우 5/12 KPI ===
+    main_l, main_r = st.columns([7, 5])
+    with main_l:
+        # 신규 입력 폼 (인라인 토글)
+        if st.session_state.get("wl_show_form"):
+            _render_inline_form()
+
+        # 일별 카드 렌더
+        _render_daily_cards(f, chip_key)
+
+    with main_r:
+        _render_compact_kpi(df_all, target)
+        _render_persons_quick_summary(df_all)
+        _render_visitor_trend()
+
+    # === 하단: 리포트 영역 (월/연 뷰) ===
+    st.markdown("---")
     render_report_section("업무일지", f, period_col="date")
-
-    if view == "📅 일별 (스프레드시트)":
-        _render_daily_cards(f)
-    elif view == "🗓 월별":
-        _render_monthly_view(f, target)
-    else:
-        _render_yearly_view(f)
-
-    # === 신규 입력 폼 (하단) ===
-    _render_input_form()
-
-    # === 본사 시트 별도 탭 ===
-    _render_visitor_trend()
+    with st.expander("🗓 월별 / 📆 연별 분석", expanded=False):
+        view = st.radio("뷰", ["🗓 월별", "📆 연별"], horizontal=True, key="wl_extra_view")
+        if view == "🗓 월별":
+            _render_monthly_view(f, target)
+        else:
+            _render_yearly_view(f)
 
     render_task_widget("업무일지")
 
 
 # ============================================================
-# 상단 고정 KPI 4종
+# 데이터 무결성 알림
 # ============================================================
-def _render_top_kpi(df: pd.DataFrame, target: dict | None):
+def _render_integrity_banner(df: pd.DataFrame, target: dict | None):
+    if not target or not target.get("achieved"):
+        return  # 시트 헤더 미입력 → 비교 불가
     today = date.today()
     cur_ym = f"{today.year}-{today.month:02d}"
     month_df = df[df["ym"] == cur_ym]
-    paid_month = month_df[month_df["amount"] > 0]
-    cur_sales = int(paid_month["amount"].sum())
-    active_days = month_df["date"].dt.date.nunique()
-    daily_avg = cur_sales // max(active_days, 1) if active_days else 0
-
-    target_val = target.get("target") if target else None
-    rate = (cur_sales / target_val * 100) if target_val else None
-
-    cols = st.columns(4)
-    if target_val:
-        cols[0].markdown(black_kpi_card(
-            f"{today.month}월 목표", f"₩{target_val/1e8:.2f}억",
-            f"본사 시트 1행", "gold", "🎯"
-        ), unsafe_allow_html=True)
+    computed = int(month_df[month_df["amount"] > 0]["amount"].sum())
+    header_val = int(target["achieved"])
+    gap = header_val - computed
+    abs_gap = abs(gap)
+    if abs_gap < 100_000:
+        cls = ""
+        icon = "✓"
+        label = "데이터 무결성 양호"
+    elif abs_gap < 1_000_000:
+        cls = ""
+        icon = "ℹ"
+        label = "소폭 차이"
+    elif abs_gap < 5_000_000:
+        cls = "warn"
+        icon = "⚠"
+        label = "갭 주의"
     else:
-        cols[0].markdown(black_kpi_card(
-            f"{today.month}월 목표", "—",
-            "본사 시트에 목표 미입력", "neutral", "🎯"
-        ), unsafe_allow_html=True)
+        cls = "error"
+        icon = "🚨"
+        label = "갭 큼 — 점검 필요"
 
-    cols[1].markdown(black_kpi_card(
-        "금일 누계 매출", f"₩{cur_sales:,}",
-        f"{today.month}월 누계 · {len(paid_month)}건", "gold", "💰"
-    ), unsafe_allow_html=True)
-
-    if rate is not None:
-        days_in_month = monthrange(today.year, today.month)[1]
-        pace = today.day / days_in_month * 100
-        trend = "up" if rate >= pace else "down"
-        cols[2].markdown(black_kpi_card(
-            "달성률", f"{rate:.1f}%",
-            f"진척 {pace:.0f}% · 잔여 ₩{max(target_val-cur_sales, 0)/1e8:.2f}억",
-            trend, "📊"
-        ), unsafe_allow_html=True)
-    else:
-        cols[2].markdown(black_kpi_card(
-            "전환률", f"{len(paid_month)/max(len(month_df),1)*100:.1f}%",
-            f"결제 {len(paid_month)} / 상담 {len(month_df)}",
-            "neutral", "📊"
-        ), unsafe_allow_html=True)
-
-    cols[3].markdown(black_kpi_card(
-        "이번달 일평균", f"₩{daily_avg:,}",
-        f"활성일 {active_days}일", "gold", "📈"
-    ), unsafe_allow_html=True)
+    sign = "+" if gap > 0 else ""
+    html = f"""
+<div class="wl-integrity {cls}">
+  <span class="wi-icon">{icon}</span>
+  <span><b>{label}</b> · {today.month}월 누계
+    산정 ₩{computed:,} · 시트 헤더 ₩{header_val:,}
+    <span class="wi-gap">갭 {sign}₩{gap:,}</span>
+  </span>
+</div>
+"""
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # ============================================================
-# 검색·필터 (collapsible)
+# 빠른 탐색 칩
 # ============================================================
-def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
+def _render_quick_chips() -> str:
+    chip = st.session_state.get("wl_chip", "today")
+    today = date.today()
+    cols = st.columns([1, 1, 1.2, 1.2, 2.5, 4])
+    if cols[0].button("오늘", use_container_width=True,
+                       type="primary" if chip == "today" else "secondary",
+                       key="ck_today"):
+        st.session_state["wl_chip"] = "today"
+        st.rerun()
+    if cols[1].button("어제", use_container_width=True,
+                       type="primary" if chip == "yesterday" else "secondary",
+                       key="ck_yest"):
+        st.session_state["wl_chip"] = "yesterday"
+        st.rerun()
+    if cols[2].button("최근 7일", use_container_width=True,
+                       type="primary" if chip == "7d" else "secondary",
+                       key="ck_7d"):
+        st.session_state["wl_chip"] = "7d"
+        st.rerun()
+    if cols[3].button("최근 30일", use_container_width=True,
+                       type="primary" if chip == "30d" else "secondary",
+                       key="ck_30d"):
+        st.session_state["wl_chip"] = "30d"
+        st.rerun()
+    # 날짜 picker
+    sel_date = cols[4].date_input(
+        "📅 날짜 점프", value=st.session_state.get("wl_pick_date", today),
+        key="wl_pick_date_input", label_visibility="collapsed",
+    )
+    if st.session_state.get("wl_pick_date") != sel_date:
+        st.session_state["wl_pick_date"] = sel_date
+        st.session_state["wl_chip"] = "date"
+    cols[5].caption(f"기준 일자: {today.strftime('%Y.%m.%d')}")
+    return st.session_state.get("wl_chip", "today")
+
+
+def _apply_chip_filter(f: pd.DataFrame, chip: str) -> pd.DataFrame:
+    today = date.today()
+    if chip == "today":
+        return f[f["date"].dt.date == today]
+    if chip == "yesterday":
+        return f[f["date"].dt.date == today - timedelta(days=1)]
+    if chip == "7d":
+        return f[f["date"].dt.date >= today - timedelta(days=7)]
+    if chip == "30d":
+        return f[f["date"].dt.date >= today - timedelta(days=30)]
+    if chip == "date":
+        sel = st.session_state.get("wl_pick_date", today)
+        return f[f["date"].dt.date == sel]
+    return f
+
+
+# ============================================================
+# 검색·필터 (한 줄, 항상 노출)
+# ============================================================
+def _render_search_filters(df: pd.DataFrame) -> pd.DataFrame:
     f = df.copy()
-    with st.expander("🔧 검색 · 필터", expanded=False):
-        search = st.text_input(
-            "🔍 텍스트 검색 (고객·내용·연락처·담당자·브랜드)",
-            placeholder="예) 카민디자인 / FLOS / 010-1234 / 추승민",
-            key="wl_search",
-        )
-        c1, c2, c3 = st.columns([1, 1, 2])
-        min_date = df["date"].min().date() if pd.notna(df["date"].min()) else date.today()
-        max_date = df["date"].max().date() if pd.notna(df["date"].max()) else date.today()
-        d1 = c1.date_input("시작", min_date, key="wl_d1")
-        d2 = c2.date_input("종료", max_date, key="wl_d2")
-        c3.caption(f"전체 기간: {min_date} ~ {max_date}")
+    fc1, fc2, fc3 = st.columns([3, 2, 2])
+    search = fc1.text_input(
+        "🔍 검색 (고객·내용·연락처·담당자)",
+        placeholder="예) 카민디자인 / 010-1234 / 추승민",
+        key="wl_search_v2", label_visibility="collapsed",
+    )
+    chans = sorted([c for c in df["channel"].unique() if c])
+    chan_f = fc2.multiselect("📍 채널", chans, default=[], key="wl_chan_v2",
+                              placeholder="채널 선택")
+    person_opts = sorted(set(p for ps in df["persons"] for p in ps if p))
+    per_f = fc3.multiselect("👤 담당자", person_opts, default=[], key="wl_per_v2",
+                             placeholder="담당자 선택")
 
-        c4, c5, c6, c7 = st.columns(4)
-        chans = sorted([c for c in df["channel"].unique() if c])
-        chan_f = c4.multiselect("📍 채널", chans, default=[], key="wl_ch")
-        cats = sorted([c for c in df["category"].unique() if c])
-        cat_f = c5.multiselect("🏷 카테고리", cats, default=[], key="wl_cat")
-        sts = sorted([s for s in df["status"].unique() if s])
-        st_f = c6.multiselect("🚦 현황", sts, default=[], key="wl_st")
-        person_opts = sorted(set(p for ps in df["persons"] for p in ps if p))
-        per_f = c7.multiselect("👤 담당자", person_opts, default=[], key="wl_per")
-
-        c8, c9 = st.columns([3, 2])
-        max_amt = int(df["amount"].max()) if len(df) else 10_000_000
-        amt_range = c8.slider(
-            "💰 매출 범위", 0, max(max_amt, 1_000_000),
-            (0, max(max_amt, 1_000_000)), 100_000, key="wl_amt"
-        )
-        only_paid = c9.checkbox("결제건만", value=False, key="wl_paid")
-        only_vip = c9.checkbox(f"VIP만 (≥₩{VIP_THRESHOLD/1e6:.0f}M)", value=False, key="wl_vip")
-
-    f = f[(f["date"].dt.date >= d1) & (f["date"].dt.date <= d2)]
     if chan_f:
         f = f[f["channel"].isin(chan_f)]
-    if cat_f:
-        f = f[f["category"].isin(cat_f)]
-    if st_f:
-        f = f[f["status"].isin(st_f)]
     if per_f:
         f = f[f["persons"].apply(lambda ps: any(p in ps for p in per_f))]
-    f = f[(f["amount"] >= amt_range[0]) & (f["amount"] <= amt_range[1])]
-    if only_paid:
-        f = f[f["amount"] > 0]
-    if only_vip:
-        f = f[f["amount"] >= VIP_THRESHOLD]
     if search:
         s = search.strip().lower()
         mask = (
@@ -266,88 +290,187 @@ def _render_filters(df: pd.DataFrame) -> pd.DataFrame:
             f["brands"].apply(lambda bl: any(s in b.lower() for b in (bl or [])))
         )
         f = f[mask]
+
+    # 고급 필터 (collapsed)
+    with st.expander("🔧 고급 필터 (현황/카테고리/매출 범위)", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        cats = sorted([c for c in df["category"].unique() if c])
+        cat_f = c1.multiselect("카테고리", cats, default=[], key="wl_cat_v2")
+        sts = sorted([s for s in df["status"].unique() if s])
+        st_f = c2.multiselect("현황", sts, default=[], key="wl_st_v2")
+        only_paid = c3.checkbox("결제건만", value=False, key="wl_paid_v2")
+        max_amt = int(df["amount"].max()) if len(df) else 10_000_000
+        amt_range = st.slider("💰 매출 범위", 0, max(max_amt, 1_000_000),
+                               (0, max(max_amt, 1_000_000)), 100_000, key="wl_amt_v2")
+        if cat_f:
+            f = f[f["category"].isin(cat_f)]
+        if st_f:
+            f = f[f["status"].isin(st_f)]
+        f = f[(f["amount"] >= amt_range[0]) & (f["amount"] <= amt_range[1])]
+        if only_paid:
+            f = f[f["amount"] > 0]
     return f
 
 
 # ============================================================
-# View 1. 📅 일별 — 스프레드시트 1:1 재현 카드
+# 컴팩트 KPI (우측 5/12)
 # ============================================================
-def _render_daily_cards(f: pd.DataFrame):
-    st.markdown(section_header(
-        "본사 업무일지 — 일별 블록", "스프레드시트 양식 1:1 재현"
-    ), unsafe_allow_html=True)
-
+def _render_compact_kpi(df: pd.DataFrame, target: dict | None):
     today = date.today()
-    # 날짜별 group 후 역순 정렬
+    cur_ym = f"{today.year}-{today.month:02d}"
+    month_df = df[df["ym"] == cur_ym]
+    paid_month = month_df[month_df["amount"] > 0]
+    cur_sales = int(paid_month["amount"].sum())
+    active_days = month_df["date"].dt.date.nunique()
+    daily_avg = cur_sales // max(active_days, 1) if active_days else 0
+    target_val = target.get("target") if target else None
+    rate = (cur_sales / target_val * 100) if target_val else None
+
+    st.markdown("##### 📊 이번달 핵심")
+    r1c1, r1c2 = st.columns(2)
+    with r1c1:
+        if target_val:
+            st.markdown(_mini_kpi(
+                f"{today.month}월 목표", f"₩{target_val/1e8:.2f}억",
+                "본사 시트", "gold", "🎯"
+            ), unsafe_allow_html=True)
+        else:
+            st.markdown(_mini_kpi("목표", "—", "미입력", "neutral", "🎯"),
+                        unsafe_allow_html=True)
+    with r1c2:
+        st.markdown(_mini_kpi(
+            "누계 매출", f"₩{cur_sales/1e8:.2f}억",
+            f"({cur_sales:,})", "gold", "💰"
+        ), unsafe_allow_html=True)
+    r2c1, r2c2 = st.columns(2)
+    with r2c1:
+        if rate is not None:
+            days_in_month = monthrange(today.year, today.month)[1]
+            pace = today.day / days_in_month * 100
+            trend = "up" if rate >= pace else "down"
+            st.markdown(_mini_kpi(
+                "달성률", f"{rate:.1f}%",
+                f"진척 {pace:.0f}%", trend, "📊"
+            ), unsafe_allow_html=True)
+        else:
+            conv = len(paid_month) / max(len(month_df), 1) * 100
+            st.markdown(_mini_kpi(
+                "전환률", f"{conv:.1f}%",
+                f"{len(paid_month)}/{len(month_df)}", "neutral", "📊"
+            ), unsafe_allow_html=True)
+    with r2c2:
+        st.markdown(_mini_kpi(
+            "일평균", f"₩{daily_avg/1e6:.1f}M",
+            f"{active_days}일 활성", "gold", "📈"
+        ), unsafe_allow_html=True)
+
+
+def _mini_kpi(label: str, value: str, sub: str = "", trend: str = "neutral", icon: str = "") -> str:
+    sub_cls = trend if trend in ("up","down","gold") else ""
+    icon_html = f'<div class="km-icon">{icon}</div>' if icon else ""
+    return f"""
+<div class="wl-kpi-mini">
+  {icon_html}
+  <div class="km-label">{label}</div>
+  <div>
+    <div class="km-value">{value}</div>
+    <div class="km-sub {sub_cls}">{sub}</div>
+  </div>
+</div>
+"""
+
+
+def _render_persons_quick_summary(df: pd.DataFrame):
+    """우측: 이번달 담당자별 매출 미니 리더보드"""
+    today = date.today()
+    cur_ym = f"{today.year}-{today.month:02d}"
+    month_df = df[df["ym"] == cur_ym]
+    if not len(month_df):
+        return
+    st.markdown("##### 👤 이번달 담당자 Top 5")
+    by_p = aggregate_by_person(month_df).head(5)
+    if not len(by_p):
+        st.caption("담당자 데이터 없음")
+        return
+    for i, row in enumerate(by_p.itertuples(), 1):
+        color = _person_color(row.persons)
+        st.markdown(leaderboard_row(
+            rank=i, name=row.persons,
+            sub=f"상담 {row.consult_count} · 결제 {row.paid_count}",
+            value=f"₩{int(row.sales/1e6):,}M", value_label="MONTH",
+            color=color,
+        ), unsafe_allow_html=True)
+
+
+# ============================================================
+# 일별 카드 (좌측 7/12) — 스프레드시트 1:1
+# ============================================================
+def _render_daily_cards(f: pd.DataFrame, chip: str):
+    today = date.today()
     grouped = sorted(
         f.groupby(f["date"].dt.date),
         key=lambda kv: kv[0],
         reverse=True,
     )
+    if not grouped:
+        st.info("선택 기간에 데이터 없음")
+        return
 
-    PAGE_SIZE = 7
-    total_days = len(grouped)
-    if total_days > PAGE_SIZE:
-        page = st.number_input(
-            f"페이지 (총 {total_days}일, 페이지당 {PAGE_SIZE}일)",
-            min_value=1, max_value=(total_days + PAGE_SIZE - 1) // PAGE_SIZE,
-            value=1, step=1, key="wl_daily_page",
-        )
-        start = (page - 1) * PAGE_SIZE
-        end = start + PAGE_SIZE
+    # 칩에 따라 펼침 정책
+    if chip in ("today", "yesterday", "date"):
+        # 단일 일자 → 모두 펼침
+        expanded_set = {d for d, _ in grouped}
     else:
-        start, end = 0, total_days
+        # 다일 → 첫번째(최신)만 펼침
+        expanded_set = {grouped[0][0]} if grouped else set()
 
-    for d_obj, day_df in grouped[start:end]:
-        _render_day_block(d_obj, day_df, is_today=(d_obj == today))
+    # 30일 같이 많을 때는 좌우 네비
+    if chip == "30d" and len(grouped) > 10:
+        nav = st.columns([1, 4, 1])
+        page_key = "wl_30d_page"
+        page = nav[1].slider(
+            f"날짜 슬라이드 (총 {len(grouped)}일)",
+            1, len(grouped), st.session_state.get(page_key, 1),
+            key=page_key, label_visibility="collapsed",
+        )
+        # 5일 윈도우 표시
+        win_start = (page - 1)
+        grouped = grouped[win_start: win_start + 7]
+        nav[0].caption(f"← {grouped[0][0].strftime('%m/%d') if grouped else ''}")
+        nav[2].caption(f"{grouped[-1][0].strftime('%m/%d') if grouped else ''} →")
+
+    for d_obj, day_df in grouped:
+        _render_day_block(d_obj, day_df,
+                          is_today=(d_obj == today),
+                          force_expanded=(d_obj in expanded_set))
 
 
-def _render_day_block(d_obj: date, day_df: pd.DataFrame, is_today: bool = False):
+def _render_day_block(d_obj: date, day_df: pd.DataFrame,
+                      is_today: bool = False, force_expanded: bool = False):
     weekday = ["월","화","수","목","금","토","일"][d_obj.weekday()]
     paid = day_df[day_df["amount"] > 0]
     total_paid = int(paid["amount"].sum())
     n_entries = len(day_df)
 
-    # 진행/이슈 메모 분리 (parser는 이를 별도로 보존 안 함 — content에 합쳐져 있을 가능성)
-    # 여기서는 표시만 (시트의 진행/이슈 행은 parser에서 skip됨)
-    progress_notes = []
-    issue_notes = []
-
-    # 헤더 + 미니 KPI
     header_label = f"📅 {d_obj.strftime('%Y.%m.%d')} ({weekday})"
     if is_today:
         header_label = f"⭐ {header_label} · 오늘"
 
-    with st.expander(header_label, expanded=is_today):
-        # 메타 행
-        mc1, mc2, mc3, mc4 = st.columns([2, 1, 1, 1])
-        mc1.markdown(f"""
-<div class="wl-day-meta">
-  <div class="wm-kpi">
-    <span>유입 <b>{n_entries}팀</b></span>
-    <span>결제 <b>{len(paid)}건</b></span>
-    <span>매출 <b>₩{total_paid:,}</b></span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-        if mc4.button("✏ 빠른 추가", key=f"add_{d_obj.isoformat()}", help="이 날짜에 새 행을 추가합니다"):
-            st.session_state["form_default_date"] = d_obj
-            st.session_state["scroll_to_form"] = True
-
-        # === 채널 → 카테고리 grouped 렌더 ===
-        # 본사 시트는 같은 블록 내 채널/카테고리 셀을 병합으로 표시 (빈 셀 = 위 행 상속)
-        # parser는 raw로 가져오므로 forward-fill로 시트와 동일한 시각 효과 재현.
+    with st.expander(
+        f"{header_label}  ·  유입 {n_entries}팀  ·  결제 ₩{total_paid:,}",
+        expanded=(is_today or force_expanded),
+    ):
+        # 채널·카테고리 forward-fill (셀 병합 효과 재현)
         day_df_d = day_df.copy().reset_index(drop=True)
         day_df_d["channel"] = day_df_d["channel"].replace("", pd.NA).ffill().fillna("(미지정)")
         day_df_d["category"] = day_df_d["category"].replace("", pd.NA).ffill().fillna("(미지정)")
-        day_df_d["channel_d"] = day_df_d["channel"]
-        day_df_d["category_d"] = day_df_d["category"]
 
-        channel_order = {"내방":0, "유선":1, "온라인":2, "소개":3, "기타":4, "(미지정)":9}
-        category_order = {"소비자":0, "업체":1, "디자이너":2, "기타":3, "(미지정)":9}
+        channel_order = {"내방":0, "유선":1, "온라인":2, "소개":3, "(미지정)":9}
+        category_order = {"소비자":0, "업체":1, "디자이너":2, "(미지정)":9}
 
-        for ch in sorted(day_df_d["channel_d"].unique(), key=lambda c: channel_order.get(c, 5)):
-            ch_df = day_df_d[day_df_d["channel_d"] == ch]
+        for ch in sorted(day_df_d["channel"].unique(),
+                          key=lambda c: channel_order.get(c, 5)):
+            ch_df = day_df_d[day_df_d["channel"] == ch]
             ch_label = CHANNEL_LABEL.get(ch, f"  {ch}")
             ch_css = CHANNEL_CSS.get(ch, "")
             ch_paid_sum = int(ch_df[ch_df["amount"] > 0]["amount"].sum())
@@ -358,8 +481,9 @@ def _render_day_block(d_obj: date, day_df: pd.DataFrame, is_today: bool = False)
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            for cat in sorted(ch_df["category_d"].unique(), key=lambda c: category_order.get(c, 5)):
-                cat_df = ch_df[ch_df["category_d"] == cat]
+            for cat in sorted(ch_df["category"].unique(),
+                               key=lambda c: category_order.get(c, 5)):
+                cat_df = ch_df[ch_df["category"] == cat]
                 st.markdown(
                     f'<div class="wl-category">└─ {cat} '
                     f'<span style="font-weight:400;color:#999">({len(cat_df)}건)</span></div>',
@@ -368,13 +492,15 @@ def _render_day_block(d_obj: date, day_df: pd.DataFrame, is_today: bool = False)
                 for r in cat_df.itertuples():
                     _render_record_row(r)
 
-        # 진행/이슈 메모 (parser 미보존 — 자리 마련만)
-        st.markdown(
-            '<div class="wl-memo-box"><span class="wm-tag">📝 진행사항</span>'
-            '<span style="color:#999">시트의 진행사항 행은 본 모듈에서 직접 표시되지 않습니다 — '
-            '본사 시트에서 직접 확인하세요.</span></div>',
-            unsafe_allow_html=True,
-        )
+        # 일일 합계 푸터
+        st.markdown(f"""
+<div class="wl-day-footer">
+  <span>상담 <b>{n_entries}건</b></span>
+  <span>결제 <b>{len(paid)}건</b></span>
+  <span>매출 <b>₩{total_paid:,}</b></span>
+  <span>객단가 <b>₩{(total_paid // max(len(paid), 1)) if len(paid) else 0:,}</b></span>
+</div>
+""", unsafe_allow_html=True)
 
 
 def _render_record_row(r):
@@ -383,6 +509,10 @@ def _render_record_row(r):
     cust = (r.customer or "—").replace("\n", " / ")
     phone = (r.phone or "").strip()
     content = (r.content or "").strip().replace("\n", " ")
+    if len(content) > 50:
+        content_disp = content[:50] + "…"
+    else:
+        content_disp = content
     amount = int(r.amount or 0)
     brands = r.brands if isinstance(r.brands, list) else []
     brands_html = f'<div class="wr-brands">🏷 {" · ".join(brands[:5])}</div>' if brands else ""
@@ -398,7 +528,7 @@ def _render_record_row(r):
   <div class="wr-status" style="background:{status_color}">{status_v}</div>
   <div class="wr-body">
     <div><span class="wr-customer">{cust}</span>{phone_html}</div>
-    <div class="wr-content">{content[:200]}{'…' if len(content) > 200 else ''}</div>
+    <div class="wr-content" title="{content}">{content_disp}</div>
     {brands_html}
   </div>
   <div class="wr-person">{person_html}</div>
@@ -408,66 +538,90 @@ def _render_record_row(r):
 
 
 # ============================================================
-# View 2. 🗓 월별
+# 신규 입력 인라인 폼
+# ============================================================
+def _render_inline_form():
+    st.markdown('<div class="wl-inline-form"><div class="if-title">➕ 새 영업 기록</div></div>',
+                unsafe_allow_html=True)
+    from parsers.worklog_writer import _has_service_account
+    if not _has_service_account():
+        st.caption("ⓘ Service Account 미설정 — 저장 시 TSV 텍스트 출력 (수동 모드)")
+
+    with st.form("wl_inline_form", clear_on_submit=True):
+        r1 = st.columns([1.2, 1, 1, 1])
+        f_date = r1[0].date_input("일자", value=date.today())
+        f_channel = r1[1].selectbox("채널", CHANNEL_OPTIONS, index=0)
+        f_category = r1[2].selectbox("카테고리", CATEGORY_OPTIONS, index=0)
+        f_status = r1[3].selectbox("현황", STATUS_OPTIONS, index=1)
+
+        r2 = st.columns([2, 2])
+        f_customer = r2[0].text_input("고객명", placeholder="예) 단체 가족")
+        f_phone = r2[1].text_input("연락처", placeholder="010-XXXX-XXXX")
+
+        f_content = st.text_area("내용", height=70,
+                                  placeholder="상담 내용 한 줄")
+
+        r3 = st.columns([1.5, 1])
+        f_person = r3[0].text_input("담당자", placeholder="예) 서영완 / 추승민")
+        f_amount = r3[1].number_input("매출(원)", min_value=0, step=10_000, value=0)
+
+        bc1, bc2 = st.columns([1, 1])
+        submitted = bc1.form_submit_button("💾 저장", type="primary", use_container_width=True)
+        cancel = bc2.form_submit_button("✕ 닫기", use_container_width=True)
+
+    if cancel:
+        st.session_state["wl_show_form"] = False
+        st.rerun()
+
+    if submitted:
+        if not f_customer.strip():
+            st.error("고객명 필수")
+            return
+        record = {
+            "channel": f_channel, "category": f_category, "status": f_status,
+            "customer": f_customer.strip(), "phone": f_phone.strip(),
+            "content": f_content.strip(), "person": f_person.strip(),
+            "amount": f_amount if f_amount > 0 else "",
+        }
+        with st.spinner("본사 시트 저장 중..."):
+            result = append_worklog_row(record, f_date, SHEET_ID, WORKLOG_TAB)
+        if result["ok"]:
+            st.success(f"✓ 저장 완료 (행 {result['row']})")
+            st.session_state["wl_show_form"] = False
+            st.cache_data.clear()
+            st.balloons()
+            st.rerun()
+        else:
+            st.warning(f"⚠ 자동 write 미실행: {result.get('error', '')}")
+            if result.get("header_tsv"):
+                st.caption("📌 새 날짜 블록 헤더:")
+                st.code(result["header_tsv"], language="text")
+            st.caption("📌 데이터 행:")
+            st.code(result["tsv"], language="text")
+
+
+# ============================================================
+# 월별 / 연별 (하단 expander 안)
 # ============================================================
 def _render_monthly_view(f: pd.DataFrame, target: dict | None):
-    available_yms = sorted(f["ym"].unique(), reverse=True)
-    if not available_yms:
+    avail = sorted(f["ym"].unique(), reverse=True)
+    if not avail:
         st.info("월별 데이터 없음")
         return
     today = date.today()
     cur_ym = f"{today.year}-{today.month:02d}"
-    default_ym = cur_ym if cur_ym in available_yms else available_yms[0]
-    sel_ym = st.selectbox("🗓 월", available_yms, index=available_yms.index(default_ym),
-                          key="wl_m_ym")
-    sel_year, sel_month = int(sel_ym[:4]), int(sel_ym[5:7])
+    default = cur_ym if cur_ym in avail else avail[0]
+    sel_ym = st.selectbox("🗓 월", avail, index=avail.index(default), key="wl_m_ym2")
     month_df = f[f["ym"] == sel_ym]
     paid = month_df[month_df["amount"] > 0]
-
-    total_sales = int(paid["amount"].sum())
+    total = int(paid["amount"].sum())
     deals = len(paid)
-    consult = len(month_df)
-    avg_ticket = total_sales // max(deals, 1) if deals else 0
-    active_days = month_df["date"].dt.date.nunique()
 
-    # MoM
-    monthly_agg = aggregate_monthly(f)
-    mom = 0
-    if sel_ym in monthly_agg["ym"].values:
-        cur_idx = monthly_agg[monthly_agg["ym"] == sel_ym].index[0]
-        if cur_idx > 0:
-            prev_sales = int(monthly_agg.loc[cur_idx - 1, "sales"])
-            mom = (total_sales - prev_sales) / max(prev_sales, 1) * 100 if prev_sales else 0
+    cols = st.columns(3)
+    cols[0].metric("매출", f"₩{total:,}")
+    cols[1].metric("결제건", f"{deals}건")
+    cols[2].metric("객단가", f"₩{total//max(deals,1):,}")
 
-    cols = st.columns(4)
-    cols[0].markdown(black_kpi_card(
-        f"{sel_ym} 매출", f"₩{total_sales/1e8:.2f}억",
-        f"({total_sales:,})", "gold", "💰"
-    ), unsafe_allow_html=True)
-    cols[1].markdown(black_kpi_card(
-        "MoM", f"{mom:+.1f}%", f"활성 {active_days}일",
-        "up" if mom >= 0 else "down", "📈"
-    ), unsafe_allow_html=True)
-    cols[2].markdown(black_kpi_card(
-        "객단가 / 전환률", f"₩{avg_ticket:,}",
-        f"전환 {deals/max(consult,1)*100:.1f}%",
-        "gold" if deals/max(consult,1)*100 >= 20 else "neutral", "🎯"
-    ), unsafe_allow_html=True)
-    if target and target.get("target") and target.get("month") == sel_month:
-        rate = total_sales / target["target"] * 100
-        days_in_month = monthrange(sel_year, sel_month)[1]
-        cols[3].markdown(black_kpi_card(
-            "목표 달성률", f"{rate:.1f}%",
-            f"목표 ₩{target['target']/1e8:.2f}억", "up" if rate >= 80 else "down", "🎯"
-        ), unsafe_allow_html=True)
-    else:
-        daily_avg = total_sales // max(active_days, 1) if active_days else 0
-        cols[3].markdown(black_kpi_card(
-            "일평균", f"₩{daily_avg:,}", f"{active_days}일", "gold", "📊"
-        ), unsafe_allow_html=True)
-
-    # 일별 매출 라인 차트
-    st.markdown(section_header(f"{sel_ym} 일별 매출 추세"), unsafe_allow_html=True)
     if len(paid):
         daily = paid.groupby(paid["date"].dt.date)["amount"].sum().reset_index()
         daily.columns = ["date", "amount"]
@@ -478,185 +632,54 @@ def _render_monthly_view(f: pd.DataFrame, target: dict | None):
             marker=dict(size=8, color="#0A0A0A"), fill="tozeroy",
             fillcolor="rgba(201,169,97,0.1)",
         ))
-        fig.update_layout(
-            height=300, margin=dict(t=20,b=20,l=20,r=20),
-            plot_bgcolor="#fff", paper_bgcolor="#fff", showlegend=False,
-        )
+        fig.update_layout(height=260, margin=dict(t=20,b=20,l=20,r=20),
+                          plot_bgcolor="#fff", paper_bgcolor="#fff", showlegend=False)
         fig.update_xaxes(gridcolor="#E8E8E8")
-        fig.update_yaxes(gridcolor="#E8E8E8", title_text="매출(₩)")
+        fig.update_yaxes(gridcolor="#E8E8E8")
         st.plotly_chart(fig, use_container_width=True)
 
-    # 일별 카드 압축 표시
-    st.markdown(section_header(f"{sel_ym} 일별 블록 (압축)", "expander로 펼쳐서 보기"),
-                unsafe_allow_html=True)
-    _render_daily_cards(month_df)
 
-
-# ============================================================
-# View 3. 📆 연별
-# ============================================================
 def _render_yearly_view(f: pd.DataFrame):
     f = f.copy()
     f["year"] = f["date"].dt.year
     f["quarter"] = f["date"].dt.quarter
-    avail_years = sorted(f["year"].dropna().unique(), reverse=True)
-    if not avail_years:
-        st.info("연도별 데이터 없음")
+    avail = sorted(f["year"].dropna().unique(), reverse=True)
+    if not avail:
         return
-    sel_year = st.selectbox("📆 연도", avail_years, index=0, key="wl_y_year")
+    sel_year = st.selectbox("📆 연도", avail, index=0, key="wl_y_year2")
     year_df = f[f["year"] == sel_year]
     paid = year_df[year_df["amount"] > 0]
-
-    total_sales = int(paid["amount"].sum())
-    deals = len(paid)
-    active_months = year_df["ym"].nunique()
-    avg_monthly = total_sales // max(active_months, 1) if active_months else 0
-    monthly_sum = paid.groupby("ym")["amount"].sum()
-    best_ym = monthly_sum.idxmax() if len(monthly_sum) else "—"
-    best_sales = int(monthly_sum.max()) if len(monthly_sum) else 0
+    total = int(paid["amount"].sum())
+    cols = st.columns(3)
+    cols[0].metric("연 누계", f"₩{total/1e8:.2f}억")
+    cols[1].metric("결제건", f"{len(paid)}건")
     vip = paid[paid["amount"] >= VIP_THRESHOLD]
+    cols[2].metric("VIP 매출", f"₩{int(vip['amount'].sum())/1e8:.2f}억")
 
-    cols = st.columns(4)
-    cols[0].markdown(black_kpi_card(
-        f"{sel_year}년 누계", f"₩{total_sales/1e8:.2f}억",
-        f"{deals}건", "gold", "💰"), unsafe_allow_html=True)
-    cols[1].markdown(black_kpi_card(
-        "월 평균", f"₩{avg_monthly/1e8:.2f}억",
-        f"{active_months}개월 활성", "neutral", "📊"), unsafe_allow_html=True)
-    cols[2].markdown(black_kpi_card(
-        "최고 월", best_ym, f"₩{best_sales/1e8:.2f}억", "up", "🏆"
-    ), unsafe_allow_html=True)
-    cols[3].markdown(black_kpi_card(
-        "VIP 매출", f"₩{int(vip['amount'].sum())/1e8:.2f}억",
-        f"{len(vip)}건 / {len(vip)/max(deals,1)*100:.0f}%",
-        "gold", "💎"), unsafe_allow_html=True)
+    # 월별 라인
+    m_agg = paid.groupby("ym").agg(sales=("amount","sum")).reset_index().sort_values("ym")
+    if len(m_agg):
+        fig = px.line(m_agg, x="ym", y="sales", markers=True,
+                      color_discrete_sequence=["#C9A961"])
+        fig.update_layout(height=260, plot_bgcolor="#fff", paper_bgcolor="#fff")
+        st.plotly_chart(fig, use_container_width=True)
 
-    # 월별 라인 + 분기 비교
-    col_m, col_q = st.columns([2, 1])
-    with col_m:
-        st.markdown(section_header(f"{sel_year}년 월별 매출"), unsafe_allow_html=True)
-        m_agg = paid.groupby("ym").agg(sales=("amount","sum"), deals=("amount","count")).reset_index().sort_values("ym")
-        if len(m_agg):
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            fig.add_trace(go.Bar(x=m_agg["ym"], y=m_agg["deals"], name="결제 건수",
-                                  marker_color="#E8E8E8"), secondary_y=True)
-            fig.add_trace(go.Scatter(x=m_agg["ym"], y=m_agg["sales"], name="매출",
-                                      mode="lines+markers",
-                                      line=dict(color="#C9A961", width=3),
-                                      marker=dict(size=10, color="#0A0A0A")),
-                           secondary_y=False)
-            fig.update_layout(height=320, margin=dict(t=30,b=20,l=20,r=20),
-                              plot_bgcolor="#fff", paper_bgcolor="#fff",
-                              legend=dict(orientation="h", y=1.1))
-            fig.update_yaxes(title_text="매출(₩)", secondary_y=False, gridcolor="#E8E8E8")
-            fig.update_yaxes(title_text="건수", secondary_y=True, gridcolor="#E8E8E8")
-            st.plotly_chart(fig, use_container_width=True)
-
-    with col_q:
-        st.markdown(section_header("분기 비교"), unsafe_allow_html=True)
-        q_df = paid.groupby("quarter").agg(sales=("amount","sum")).reset_index()
-        if len(q_df):
-            q_df["분기"] = q_df["quarter"].apply(lambda q: f"Q{q}")
-            fig = go.Figure(go.Bar(
-                x=q_df["분기"], y=q_df["sales"],
-                marker_color=["#0A0A0A","#1976D2","#C9A961","#FF6B35"][:len(q_df)],
-                text=[f"₩{int(v/1e8):.1f}억" if v >= 1e8 else f"₩{int(v/1e6):,}M" for v in q_df["sales"]],
-                textposition="outside",
-            ))
-            fig.update_layout(height=320, margin=dict(t=30,b=20,l=20,r=20),
-                              plot_bgcolor="#fff", paper_bgcolor="#fff", showlegend=False)
-            fig.update_yaxes(gridcolor="#E8E8E8")
-            st.plotly_chart(fig, use_container_width=True)
-
-    # LTV Top 10
-    st.markdown(section_header(f"LTV Top 10 — {sel_year}년 누적"), unsafe_allow_html=True)
-    ltv = aggregate_by_customer(paid).sort_values("sales", ascending=False).head(10)
+    # LTV Top 5
+    ltv = aggregate_by_customer(paid).sort_values("sales", ascending=False).head(5)
     for i, row in enumerate(ltv.itertuples(), 1):
-        color = "#C9A961" if i == 1 else ("#0A0A0A" if i <= 3 else "#999999")
-        name = (row.customer or "—")[:25]
-        last = row.last_visit.strftime("%m/%d") if pd.notna(row.last_visit) else "—"
+        color = _person_color("") if i > 3 else ["#C9A961", "#0A0A0A", "#0A0A0A"][i-1]
         st.markdown(leaderboard_row(
-            rank=i, name=name,
-            sub=f"{row.visits}건 · 최근 {last}",
+            rank=i, name=(row.customer or "—")[:25],
+            sub=f"{row.visits}건 · 최근 {row.last_visit.strftime('%m/%d') if pd.notna(row.last_visit) else '—'}",
             value=f"₩{int(row.sales):,}", value_label="LIFETIME", color=color,
         ), unsafe_allow_html=True)
 
 
 # ============================================================
-# 신규 입력 폼 (하단 expander)
-# ============================================================
-def _render_input_form():
-    default_date = st.session_state.get("form_default_date", date.today())
-    expanded = st.session_state.pop("scroll_to_form", False)
-    with st.expander("➕ 새 영업 기록 추가 (본사 시트에 즉시 기록)", expanded=expanded):
-        from parsers.worklog_writer import _has_service_account
-        if _has_service_account():
-            st.markdown(alert_banner(
-                "✓ Service Account 활성", "저장 시 본사 시트의 해당 날짜 블록에 자동 append됩니다.",
-                level="green", icon="✓",
-            ), unsafe_allow_html=True)
-        else:
-            st.markdown(alert_banner(
-                "ⓘ Service Account 미설정 — 수동 모드",
-                "저장 시 TSV 텍스트가 출력됩니다 — 복사 → 본사 시트에 붙여넣기.",
-                level="blue", icon="ⓘ",
-            ), unsafe_allow_html=True)
-
-        with st.form("worklog_quick_form", clear_on_submit=True):
-            r1c1, r1c2, r1c3, r1c4 = st.columns([1.2, 1, 1, 1])
-            f_date = r1c1.date_input("📅 날짜", value=default_date)
-            f_channel = r1c2.selectbox("📍 채널", CHANNEL_OPTIONS, index=0)
-            f_category = r1c3.selectbox("🏷 카테고리", CATEGORY_OPTIONS, index=0)
-            f_status = r1c4.selectbox("🚦 현황", STATUS_OPTIONS, index=1)
-
-            r2c1, r2c2 = st.columns([2, 2])
-            f_customer = r2c1.text_input("👤 고객명",
-                                          placeholder="예) 단체 가족 / 김아름 사원 손님")
-            f_phone = r2c2.text_input("☎ 연락처", placeholder="010-XXXX-XXXX")
-
-            f_content = st.text_area("📝 내용",
-                                     placeholder="예) Luce / Grammoluce 견적 안내 > 다음주 재방문",
-                                     height=80)
-
-            r3c1, r3c2 = st.columns([1.5, 1])
-            f_person = r3c1.text_input("🧑 담당자",
-                                        placeholder="예) 서영완 선임 / 추승민 사원")
-            f_amount = r3c2.number_input("💰 매출(원)", min_value=0, step=10_000, value=0)
-
-            submitted = st.form_submit_button("💾 본사 시트에 저장", type="primary",
-                                              use_container_width=True)
-
-        if submitted:
-            if not f_customer.strip():
-                st.error("고객명은 필수입니다.")
-                return
-            record = {
-                "channel": f_channel, "category": f_category, "status": f_status,
-                "customer": f_customer.strip(), "phone": f_phone.strip(),
-                "content": f_content.strip(), "person": f_person.strip(),
-                "amount": f_amount if f_amount > 0 else "",
-            }
-            with st.spinner("본사 시트에 저장 중..."):
-                result = append_worklog_row(record, f_date, SHEET_ID, WORKLOG_TAB)
-            if result["ok"]:
-                st.success(f"✓ 본사 시트에 저장 완료 (행 {result['row']}, {f_date.isoformat()})")
-                st.balloons()
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.warning(f"⚠ 자동 write 미실행: {result.get('error', '')}")
-                if result.get("header_tsv"):
-                    st.caption("📌 같은 날짜 블록이 시트에 없습니다 — 헤더부터:")
-                    st.code(result["header_tsv"], language="text")
-                st.caption("📌 데이터 행:")
-                st.code(result["tsv"], language="text")
-
-
-# ============================================================
-# 본사 시트: 내방객 추이 표
+# 본사 시트 내방객 추이 표
 # ============================================================
 def _render_visitor_trend():
-    with st.expander("📊 내방객 추이 (본사 시트 별도 탭 연동)", expanded=False):
+    with st.expander("📊 내방객 추이 (본사 시트 별도 탭)", expanded=False):
         vdf = load_visitor_trend()
         has_data = False
         if len(vdf) >= 3:
@@ -679,4 +702,4 @@ def _render_visitor_trend():
             except Exception:
                 has_data = False
         if not has_data:
-            st.caption("ℹ 본사 시트 '내방객 추이 표' 탭(B4:D6)에 단순 내방객/구매 가능 고객별 내방·견적·전환율을 입력하면 활성화됩니다.")
+            st.caption("ℹ 본사 시트 '내방객 추이 표' 탭에 데이터 입력 시 자동 활성화")
