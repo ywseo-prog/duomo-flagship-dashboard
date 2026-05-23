@@ -9,9 +9,12 @@ import re
 from datetime import datetime, date, timedelta
 from io import BytesIO
 
-from utils import (
+# Direct sub-module imports — surface exact symbol on Streamlit Cloud ImportError
+from utils.styles import (
     greeting_header, black_kpi_card, multi_card_row, leaderboard_row,
     section_header, alert_banner, status_badge_html,
+)
+from utils.notion_client import (
     render_task_widget,
     INBOUND_MEMBERS, fetch_inbound_history, record_inbound_history,
     make_inbound_alarm_key,
