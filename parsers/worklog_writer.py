@@ -203,6 +203,64 @@ def append_worklog_row(record: dict, target_date: date,
         return result
 
 
+def update_worklog_cell(sheet_row: int, field: str, new_value,
+                        sheet_id: str, sheet_name: str = "플래그십 업무일지") -> dict:
+    """본사 시트의 특정 행·필드 셀 값 update.
+    field: channel/category/status/customer/phone/content/person/amount
+    """
+    result = {"ok": False, "error": None}
+    client = _get_gspread_client()
+    if not client:
+        result["error"] = "Service account 미설정"
+        return result
+    col = COL_MAP.get(field)
+    if not col:
+        result["error"] = f"Unknown field: {field}"
+        return result
+    try:
+        sh = client.open_by_key(sheet_id)
+        ws = sh.worksheet(sheet_name)
+        ws.update_acell(f"{col}{sheet_row}", str(new_value) if new_value is not None else "")
+        result["ok"] = True
+        return result
+    except Exception as e:
+        result["error"] = f"cell update 실패: {e}"
+        return result
+
+
+def bulk_update_worklog(changes: list[dict],
+                       sheet_id: str, sheet_name: str = "플래그십 업무일지") -> dict:
+    """다수 셀 일괄 update — changes: [{row, field, value}, ...]
+    gspread batch_update로 한 번에 처리."""
+    result = {"ok": False, "updated": 0, "error": None}
+    if not changes:
+        result["ok"] = True
+        return result
+    client = _get_gspread_client()
+    if not client:
+        result["error"] = "Service account 미설정"
+        return result
+    try:
+        sh = client.open_by_key(sheet_id)
+        ws = sh.worksheet(sheet_name)
+        batch_data = []
+        for c in changes:
+            col = COL_MAP.get(c["field"])
+            if not col: continue
+            batch_data.append({
+                "range": f"{col}{c['row']}",
+                "values": [[str(c["value"]) if c["value"] is not None else ""]],
+            })
+        if batch_data:
+            ws.batch_update(batch_data, value_input_option="USER_ENTERED")
+            result["updated"] = len(batch_data)
+        result["ok"] = True
+        return result
+    except Exception as e:
+        result["error"] = f"bulk update 실패: {e}"
+        return result
+
+
 def append_worklog_block(records: list[dict], target_date: date,
                          progress_note: str = "", issue_note: str = "",
                          sheet_id: str = "", sheet_name: str = "플래그십 업무일지") -> dict:

@@ -10,6 +10,7 @@ from .worklog_parser import (
 )
 from .worklog_writer import (
     append_worklog_row, append_worklog_block,
+    update_worklog_cell, bulk_update_worklog,
     format_row_tsv, format_date_header_tsv,
     CHANNEL_OPTIONS, CATEGORY_OPTIONS, STATUS_OPTIONS,
 )

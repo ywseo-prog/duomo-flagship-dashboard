@@ -69,7 +69,7 @@ def parse_worklog(csv_text):
     rows = df_raw.values.tolist()
     records = []
     cur_date, cur_fmt = None, None
-    for r in rows:
+    for row_idx, r in enumerate(rows, start=1):  # 1-indexed (gspread 호환)
         r = list(r) + [""]*30
         if r[1] == "날짜" or r[0] == "날짜":
             m = DATE_RE.match(r[2].strip())
@@ -82,6 +82,7 @@ def parse_worklog(csv_text):
         if cur_date and (r[2].strip() or r[3].strip()):
             amt = parse_amount(r[9])
             records.append({
+                "_sheet_row": row_idx,  # 시트의 실제 행 번호 (gspread cell update용)
                 "date": cur_date, "fmt": cur_fmt,
                 "channel": r[0], "category": r[1], "status": r[2],
                 "customer": str(r[3]).replace("\n"," / "),
