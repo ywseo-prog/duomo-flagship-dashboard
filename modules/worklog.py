@@ -155,7 +155,15 @@ def render():
             key=f"wl_grid_{cache_key}",
         )
         # 편집 결과를 session_state에 반영
-        edited_df = pd.DataFrame(grid_response.get("data") or [])
+        # 주의: AG-Grid는 data를 DataFrame으로 반환할 수 있어 'or []' 사용 시
+        # ValueError(truth value of a DataFrame is ambiguous) 발생 → None 명시 체크
+        _raw_data = grid_response.get("data")
+        if _raw_data is None:
+            edited_df = pd.DataFrame()
+        elif isinstance(_raw_data, pd.DataFrame):
+            edited_df = _raw_data.copy()
+        else:
+            edited_df = pd.DataFrame(_raw_data)
         if len(edited_df):
             st.session_state[state_key] = edited_df
     else:
