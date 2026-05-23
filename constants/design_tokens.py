@@ -50,65 +50,13 @@ CATEGORIES = ["소비자", "업체"]
 
 
 # ag-theme-streamlit 그리드용 CSS — modules/worklog.py 진입 시 inject
+# 스펙 verbatim: status 4종 + person-cell 라운드 배지 (단순화)
 GRID_CSS = """
 <style>
-/* Status cell rounded badges */
-.ag-theme-streamlit .status-done,
-.ag-theme-streamlit .status-ing,
-.ag-theme-streamlit .status-paid,
-.ag-theme-streamlit .status-todo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 12px;
-  border-radius: 14px;
-  font-size: 11px;
-  font-weight: 500;
-  min-width: 60px;
-}
-.ag-theme-streamlit .status-done {
-  background: #E6F1FB !important;
-  color: #185FA5 !important;
-  border: 1px solid #85B7EB !important;
-}
-.ag-theme-streamlit .status-ing {
-  background: #FAEEDA !important;
-  color: #854F0B !important;
-  border: 1px solid #FAC775 !important;
-}
-.ag-theme-streamlit .status-paid {
-  background: #FCEBEB !important;
-  color: #A32D2D !important;
-  border: 1px solid #F09595 !important;
-}
-.ag-theme-streamlit .status-todo {
-  background: #F1EFE8 !important;
-  color: #444441 !important;
-  border: 1px solid #D3D1C7 !important;
-}
-
-/* Person cell pink badge */
-.ag-theme-streamlit .person-cell {
-  background: #FBEAF0 !important;
-  color: #993556 !important;
-  border-radius: 14px !important;
-  padding: 2px 10px !important;
-  display: inline-flex !important;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 500;
-  border: 1px solid #ED93B1 !important;
-}
-
-/* Day group header — beige */
-.ag-theme-streamlit .ag-row-group {
-  background: #FBF7EE !important;
-}
-
-/* Row hover */
-.ag-theme-streamlit .ag-row:hover {
-  background: #FAFAFA !important;
-}
+.ag-theme-streamlit .status-done {background:#E6F1FB; color:#185FA5; border-radius:14px;}
+.ag-theme-streamlit .status-ing  {background:#FAEEDA; color:#854F0B; border-radius:14px;}
+.ag-theme-streamlit .status-paid {background:#FCEBEB; color:#A32D2D; border-radius:14px;}
+.ag-theme-streamlit .status-todo {background:#F1EFE8; color:#444441; border-radius:14px;}
+.ag-theme-streamlit .person-cell {background:#FBEAF0; color:#993556; border-radius:14px;}
 </style>
 """
