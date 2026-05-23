@@ -6,3 +6,8 @@ from .cell_renderers import (
     ROW_STYLE,
     DATE_HEADER_RENDERER,
 )
+from .worklog_html import (
+    render_worklog_html, estimate_height,
+    STATUSES as HTML_STATUSES,
+    PERSONS as HTML_PERSONS,
+)
