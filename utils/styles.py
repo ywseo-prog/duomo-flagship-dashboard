@@ -1,16 +1,24 @@
 """
-Duomo&Co Dashboard — Design System v0.4 components
-바우하우스 기능미학 × 하이엔드 리테일 × 핀테크 데이터 밀도
+Duomo&Co Dashboard — Design System v0.5 (Material 3 통합)
+바우하우스 기능미학 × 하이엔드 리테일 × 핀테크 데이터 밀도 + M3 Tokens
 """
 import streamlit as st
 from datetime import datetime
 
+# Material 3 토큰 + 기존 v0.4 컬러
+from constants.material3_tokens import build_css_variables as _m3_vars
 
-CSS_GLOBAL = """
+
+_CSS_HEAD = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
 
+/* === Material 3 Tokens (Duomo Gold adaptation) — auto-generated === */
+"""
+
+_CSS_REST = """
+/* === Duomo v0.4 Tokens (호환 유지) === */
 :root {
   --bg-base: #F8F8F8;
   --bg-panel: #FFFFFF;
@@ -400,12 +408,70 @@ div[data-testid="stMetricLabel"] { font-size: 11px !important; letter-spacing: 0
 .funnel-row .fn-fill { height: 100%; background: #fff; border-radius: 4px; }
 .funnel-row .fn-value { font-family: 'Inter',sans-serif; font-size: 18px; font-weight: 800; min-width: 90px; text-align: right; }
 .funnel-row .fn-pct { font-size: 11px; opacity: 0.85; min-width: 50px; text-align: right; }
+
+/* === Material 3 Utility Classes === */
+.m3-card-filled {
+  background: var(--m3-surface-container-highest);
+  border-radius: var(--m3-shape-medium);
+  box-shadow: var(--m3-elevation-0);
+  padding: 16px;
+}
+.m3-card-elevated {
+  background: var(--m3-surface-container-low);
+  border-radius: var(--m3-shape-medium);
+  box-shadow: var(--m3-elevation-1);
+  padding: 16px;
+  transition: box-shadow var(--m3-duration-short-3) var(--m3-easing-standard);
+}
+.m3-card-elevated:hover { box-shadow: var(--m3-elevation-2); }
+.m3-card-outlined {
+  background: var(--m3-surface);
+  border-radius: var(--m3-shape-medium);
+  border: 1px solid var(--m3-outline-variant);
+  padding: 16px;
+}
+.m3-chip {
+  display: inline-flex; align-items: center;
+  padding: 6px 12px;
+  border-radius: var(--m3-shape-small);
+  background: var(--m3-secondary-container);
+  color: var(--m3-on-secondary-container);
+  font-size: var(--m3-type-label-large-size);
+  font-weight: var(--m3-type-label-large-weight);
+  border: 1px solid var(--m3-outline-variant);
+}
+.m3-chip.assist  { background: var(--m3-surface);          color: var(--m3-on-surface); }
+.m3-chip.filter  { background: var(--m3-secondary-container);color: var(--m3-on-secondary-container); }
+.m3-chip.input   { background: var(--m3-surface-container); color: var(--m3-on-surface); }
+.m3-chip.suggest { background: var(--m3-surface);          color: var(--m3-on-surface); border-color: var(--m3-outline); }
+.m3-btn {
+  padding: 10px 24px;
+  border-radius: var(--m3-shape-full);
+  background: var(--m3-primary);
+  color: var(--m3-on-primary);
+  border: none;
+  font-size: var(--m3-type-label-large-size);
+  font-weight: var(--m3-type-label-large-weight);
+  cursor: pointer;
+  box-shadow: var(--m3-elevation-0);
+  transition: box-shadow var(--m3-duration-short-3) var(--m3-easing-standard);
+}
+.m3-btn:hover { box-shadow: var(--m3-elevation-1); }
+.m3-btn.outlined { background: transparent; color: var(--m3-primary); border: 1px solid var(--m3-outline); }
+.m3-btn.text     { background: transparent; color: var(--m3-primary); }
+.m3-btn.tonal    { background: var(--m3-secondary-container); color: var(--m3-on-secondary-container); }
 </style>
 """
 
 
 def inject_global_css():
-    st.markdown(CSS_GLOBAL, unsafe_allow_html=True)
+    # M3 토큰을 :root에 inject + 기존 v0.4 변수 + 컴포넌트 스타일 모두 합쳐서 한 번에 주입
+    full_css = _CSS_HEAD + _m3_vars() + "\n" + _CSS_REST
+    st.markdown(full_css, unsafe_allow_html=True)
+
+
+# 레거시 호환 — 기존 import 경로 (`from utils.styles import CSS_GLOBAL`) 대응
+CSS_GLOBAL = _CSS_HEAD + _m3_vars() + "\n" + _CSS_REST
 
 
 def greeting_header(name: str, role: str = "", page_title: str = ""):
