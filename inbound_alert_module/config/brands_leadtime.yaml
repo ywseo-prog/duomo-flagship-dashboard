@@ -1,0 +1,90 @@
+# config/brands_leadtime.yaml
+# 브랜드별 리드타임 (영업일 기준)
+# 발주시스템 v3 (2026-05-10 확정 기준)
+#
+# ETA 산출 3순위 (PO date + 리드타임 자동 계산)에 사용
+
+shipping_modes:
+  Air:
+    min_days: 30
+    typical_days: 35
+    max_days: 45
+  
+  Sea:
+    min_days: 90
+    typical_days: 105
+    max_days: 120
+  
+  Ocean:  # Sea와 동일
+    min_days: 90
+    typical_days: 105
+    max_days: 120
+  
+  DHL:
+    min_days: 5
+    typical_days: 7
+    max_days: 10
+  
+  Fedex:
+    min_days: 5
+    typical_days: 7
+    max_days: 10
+
+# 브랜드별 평균 리드타임 (실측 보정값 - TBD)
+# 발주시스템 v3에서 데이터 누적 후 갱신
+brands:
+  Flos:
+    typical_days_air: 35
+    typical_days_sea: 105
+    country: Italy
+  
+  Artemide:
+    typical_days_air: 35
+    typical_days_sea: 105
+    country: Italy
+  
+  "B&B":
+    typical_days_air: 40
+    typical_days_sea: 110
+    country: Italy
+  
+  "B&B Italia":
+    typical_days_air: 40
+    typical_days_sea: 110
+    country: Italy
+  
+  Maxalto:
+    typical_days_air: 40
+    typical_days_sea: 110
+    country: Italy
+  
+  "Poltrona Frau":
+    typical_days_air: 40
+    typical_days_sea: 110
+    country: Italy
+  
+  Cassina:
+    typical_days_air: 40
+    typical_days_sea: 110
+    country: Italy
+  
+  Ceccotti:
+    typical_days_air: 45
+    typical_days_sea: 120
+    country: Italy
+  
+  Knoll:
+    typical_days_air: 35
+    typical_days_sea: 110
+    country: Italy/USA
+  
+  Fendi:
+    typical_days_air: 40
+    typical_days_sea: 110
+    country: Italy
+
+# 발주시스템 v3 트리거 (참고용)
+v3_triggers:
+  air_sea_simultaneous: 90    # 여유일수 ≤ 90일
+  sea_only: 180               # 91~180일
+  monitoring: 999             # 180일+

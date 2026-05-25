@@ -1,11 +1,18 @@
 """모듈 8: 입고 추적 — 진행일지 2-Source 교차검증 + 4인 미입고 현황
 ※ Slack 발송은 사용자 결정으로 제외. 대시보드 시각화 + Notion 이력 DB만 운영.
    상세 스펙: inbound_alert_module/docs/01~04, README.md (zip 패키지 인수)
+
+[Config 외부화 v1.4]
+- inbound_alert_module/config/members.yaml      → 4인 R&R + Slack ID + receive policy
+- inbound_alert_module/config/sheets_mapping.yaml → 시트별 컬럼 위치 (fallback)
+- inbound_alert_module/config/brands_leadtime.yaml → 브랜드·운송모드 리드타임
+PyYAML 로드 → 인라인 상수보다 우선. YAML 미존재/PyYAML 미설치 시 인라인 fallback.
 """
 from __future__ import annotations  # PEP 604 (`X | None`) 호환 — Python 3.9 이하 대응
 import streamlit as st
 import pandas as pd
 import re
+import os
 from datetime import datetime, date, timedelta
 from io import BytesIO
 
@@ -21,19 +28,95 @@ from utils.notion_client import (
 )
 
 
-# ===== 4인 매칭 (config/members.yaml 인라인) =====
-# ⚠ '이경'은 고객명 빈출 → 풀네임 매칭만 사용
-MEMBER_ALIASES = {
-    "서영완": ["서영완"],
-    "조이경": ["조이경"],
-    "윤소담": ["윤소담"],
-    "추승민": ["추승민"],
-}
+# ============================================================
+# Config 로드 — YAML 우선, 미존재 시 인라인 fallback
+# ============================================================
+_CONFIG_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "inbound_alert_module", "config",
+)
 
-# 처리 제외 시트 키워드 (과거 누적·운송 별도)
-EXCLUDE_SHEET_KEYWORDS = [
-    "OLD", "Fedex", "DHL", "BeB 지연",
-]
+
+def _load_yaml(filename: str) -> dict:
+    path = os.path.join(_CONFIG_DIR, filename)
+    if not os.path.exists(path):
+        return {}
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except ImportError:
+        return {}
+    except Exception:
+        return {}
+
+
+@st.cache_resource
+def load_members_config() -> dict:
+    """members.yaml → {"members": {name: {aliases, role, slack_user_id, ...}}}"""
+    return _load_yaml("members.yaml")
+
+
+@st.cache_resource
+def load_sheets_mapping() -> dict:
+    """sheets_mapping.yaml → {duomo/notocasa: {file_id, sheets, ...}, exclude_sheets: [...]}"""
+    return _load_yaml("sheets_mapping.yaml")
+
+
+@st.cache_resource
+def load_brands_leadtime() -> dict:
+    """brands_leadtime.yaml → {shipping_modes, brands, v3_triggers}"""
+    return _load_yaml("brands_leadtime.yaml")
+
+
+def _get_member_aliases() -> dict:
+    """YAML members 우선, 미존재 시 인라인."""
+    cfg = load_members_config().get("members") or {}
+    if cfg:
+        return {name: info.get("aliases", [name]) for name, info in cfg.items()}
+    # fallback (이경 함정 가드)
+    return {
+        "서영완": ["서영완"],
+        "조이경": ["조이경"],
+        "윤소담": ["윤소담"],
+        "추승민": ["추승민"],
+    }
+
+
+def _get_exclude_sheets() -> list:
+    """sheets_mapping.exclude_sheets 우선."""
+    cfg = load_sheets_mapping().get("exclude_sheets")
+    if cfg:
+        return cfg
+    return ["OLD", "Fedex", "DHL", "BeB 지연"]
+
+
+def _get_leadtime(shipping_mode: str, brand: str = "") -> int | None:
+    """브랜드·운송모드별 typical_days 반환. ETA 3순위 산출용."""
+    cfg = load_brands_leadtime()
+    # 1) 브랜드별 typical_days_{air|sea}
+    if brand:
+        brand_info = (cfg.get("brands") or {}).get(brand)
+        if brand_info:
+            key = f"typical_days_{shipping_mode.lower()}"
+            if key in brand_info:
+                return int(brand_info[key])
+            # Sea alias
+            if shipping_mode.lower() == "ocean" and "typical_days_sea" in brand_info:
+                return int(brand_info["typical_days_sea"])
+    # 2) shipping_modes 기본값
+    modes = cfg.get("shipping_modes") or {}
+    mode_info = modes.get(shipping_mode) or modes.get(shipping_mode.capitalize())
+    if mode_info and "typical_days" in mode_info:
+        return int(mode_info["typical_days"])
+    return None
+
+
+# 모듈 로드 시점에 YAML 통합 적용 (cache_resource로 1회만)
+MEMBER_ALIASES = _get_member_aliases()
+
+# 처리 제외 시트 키워드 (YAML 우선, 미존재 시 인라인)
+EXCLUDE_SHEET_KEYWORDS = _get_exclude_sheets()
 
 # 헤더 후보 키워드 → 표준 컬럼명
 HEADER_KEYWORDS = {

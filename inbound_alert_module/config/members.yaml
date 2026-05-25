@@ -1,0 +1,44 @@
+# config/members.yaml
+# 4인 R&R 매핑 - 진행일지 E열(영업담당자) 매칭 기준
+#
+# ⚠️ 주의: '이경'은 고객명에 빈출하므로 alias에 포함 금지
+#
+# [v0.5 사용자 결정 - 2026-05-23]
+# - Slack 자동 발송 보류 → 모든 slack_user_id는 TBD 유지
+# - 대시보드 시각화 + Notion 이력 DB("확인 처리" 버튼)만 운영
+# - 추승민 receive_policy = NONE (Slack 발송 자체가 없으므로 무관)
+
+members:
+  서영완:
+    aliases:
+      - 서영완
+    role: 파트장
+    slack_user_id: U_TBD_1   # Phase 0에서 갱신
+    is_sales: true
+    progress_log_hits: 7  # 2026-05-13 시점 실측
+    
+  조이경:
+    aliases:
+      - 조이경
+    role: 영업담당
+    slack_user_id: U_TBD_2
+    is_sales: true
+    progress_log_hits: 7
+    
+  윤소담:
+    aliases:
+      - 윤소담
+    role: 영업담당
+    slack_user_id: U_TBD_3
+    is_sales: true
+    progress_log_hits: 2
+    
+  추승민:
+    aliases:
+      - 추승민
+    role: 시스템·BOM·코드 관리
+    slack_user_id: U_TBD_4
+    is_sales: false
+    progress_log_hits: 0
+    # ✓ 알람 수신 정책 확정 (Issue #1 — v0.5 사용자 결정)
+    receive_policy: NONE   # Slack 발송 자체 없음 → 정책 무관
